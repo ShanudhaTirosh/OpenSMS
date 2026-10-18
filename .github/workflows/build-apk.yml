@@ -7,6 +7,10 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+env:
+  ANDROID_API_LEVEL: '24'
+  ANDROID_MINAPI: '24'
+
 jobs:
   build:
     name: Build OpenSMS APK
@@ -23,10 +27,14 @@ jobs:
           cache: 'pip'
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
+
+      - name: Set up Rust toolchain targets
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi
 
       - name: Install system dependencies
         run: |
@@ -49,11 +57,18 @@ jobs:
       - name: Install Python build tools and dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install Cython==0.29.36 buildozer
+          pip install Cython==0.29.36 buildozer pytest httpx
           pip install -r app/req_android.txt
+
+      - name: Run automated test suite
+        run: |
+          pytest tests/ -v
 
       - name: Build Android APK with Buildozer
         working-directory: app
+        env:
+          ANDROID_API_LEVEL: '24'
+          ANDROID_MINAPI: '24'
         run: |
           buildozer android debug
 
