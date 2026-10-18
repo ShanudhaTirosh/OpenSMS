@@ -35,12 +35,15 @@ from kivymd.uix.textfield import MDTextField
 from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogSupportingText, MDDialogButtonContainer, MDDialogContentContainer
 
 # import screens (else pyinstaller may ignore it)
-from screens.mainScr import ButtonControl
+from screens.mainScr import ButtonControl, AppHomeBox
 from screens.settings import SettingsBox, ApiKeyTxtbox
-from services.smsApi import send_sms
+from screens.tailscaleScr import TailscaleBox
+from services.smsApi import send_sms, calculate_sms_segments, sanitize_phone_number
 
 # import services
 from services.postApi import get_api_keys, set_config_path, generate_new_api_key
+from services.pathMgr import atomic_write_json, get_device_ip_addresses, get_network_interfaces_info
+from services.tailscaleSvc import TailscaleService
 
 # IMPORTANT: Set this property for keyboard behavior
 Window.softinput_mode = "below_target"
@@ -79,47 +82,8 @@ class MainScreenBox(MDBoxLayout):
                 self.bottom_pad = dp(42)
 
 ## Global definitions
-__version__ = "0.2.0" # App version
+__version__ = "0.3.0" # App version
 
-# Atomic file write helper to avoid IPC race conditions
-def atomic_write_json(file_path: str, data: dict):
-    tmp_path = file_path + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as tf:
-            json.dump(data, tf, indent=2)
-            tf.flush()
-            os.fsync(tf.fileno())
-        os.replace(tmp_path, file_path)
-    except Exception as e:
-        print(f"Error atomic writing {file_path}: {e}")
-
-# Helper to discover local Wi-Fi, Ethernet, and VPN IP addresses
-def get_device_ip_addresses() -> list[str]:
-    ip_list = []
-    # 1. Outbound routing detection
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(0.2)
-        s.connect(('8.8.8.8', 80))
-        primary_ip = s.getsockname()[0]
-        s.close()
-        if primary_ip and not primary_ip.startswith('127.'):
-            ip_list.append(primary_ip)
-    except Exception:
-        pass
-
-    # 2. Hostname resolution
-    try:
-        hostname = socket.gethostname()
-        for ip in socket.gethostbyname_ex(hostname)[2]:
-            if ip not in ip_list and not ip.startswith('127.'):
-                ip_list.append(ip)
-    except Exception:
-        pass
-
-    if not ip_list:
-        ip_list.append("127.0.0.1")
-    return ip_list
 
 # Determine the base path for your application's resources
 if getattr(sys, 'frozen', False):
@@ -254,18 +218,32 @@ class OpenSmsApp(MDApp):
         print("Init success...")
 
     def update_network_addresses(self):
-        """Find local Wi-Fi, Ethernet, and VPN IP addresses."""
+        """Find local Wi-Fi, Ethernet, and VPN IP addresses, prioritizing Tailscale."""
         self.detected_ips = get_device_ip_addresses()
         port = self.req_template.get("port", 9292)
         ip_label_text = ", ".join(self.detected_ips)
-        primary_ip = self.detected_ips[0]
+        ts_status = TailscaleService.get_status()
+        preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port)
 
         try:
             home_scr = self.root.ids.home_scr
+            home_scr.is_online = self.api_started
+            home_scr.has_tailscale = ts_status["connected"]
+
+            if hasattr(home_scr.ids, "ts_chip_lbl"):
+                if ts_status["connected"]:
+                    home_scr.ids.ts_chip_lbl.text = f"Tailscale Mesh: Connected ({ts_status['ip']})"
+                else:
+                    home_scr.ids.ts_chip_lbl.text = "Tailscale: Not detected (Tap Mesh to view guide)"
+
             if hasattr(home_scr.ids, "ip_addresses_lbl"):
                 home_scr.ids.ip_addresses_lbl.text = f"{ip_label_text}"
+
             if hasattr(home_scr.ids, "api_endpoint_lbl"):
-                home_scr.ids.api_endpoint_lbl.text = f"http://{primary_ip}:{port}/sms/"
+                home_scr.ids.api_endpoint_lbl.text = f"Endpoint ({net_type}): {preferred_endpoint}"
+
+            if hasattr(self.root.ids, "tailscale_scr"):
+                self.root.ids.tailscale_scr.update_tailscale_info(port=port)
         except Exception as e:
             print(f"Notice: address labels not ready: {e}")
 
@@ -306,7 +284,7 @@ class OpenSmsApp(MDApp):
                     if resp:
                         server_stat = resp.get("server", "")
                         port = self.req_template.get("port", 9292)
-                        primary_ip = self.detected_ips[0] if self.detected_ips else "127.0.0.1"
+                        preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port)
 
                         if server_stat == "started" and not self.api_started:
                             self.api_started = True
@@ -314,15 +292,17 @@ class OpenSmsApp(MDApp):
                                 self.acquire_wakelock()
                             # Thread-safe UI update
                             def update_started_ui(dt):
-                                home = self.root.ids.home_scr.ids
-                                home.api_srv_lbl.text = f"Running on port {port}"
-                                home.api_srv_btn.btn_icon = "stop"
-                                home.api_srv_btn.btn_txt = "Stop Server"
-                                home.api_srv_btn.btn_colour = "orange"
-                                if hasattr(home, "status_icon"):
-                                    home.status_icon.icon = "check-circle"
-                                if hasattr(home, "api_endpoint_lbl"):
-                                    home.api_endpoint_lbl.text = f"http://{primary_ip}:{port}/sms/"
+                                home = self.root.ids.home_scr
+                                home.is_online = True
+                                home.ids.api_srv_lbl.text = "GATEWAY ONLINE"
+                                home.ids.api_port_sublbl.text = f"Listening on Port {port} • Ready"
+                                home.ids.api_srv_btn.btn_icon = "stop"
+                                home.ids.api_srv_btn.btn_txt = "Stop Server"
+                                home.ids.api_srv_btn.btn_colour = "orange"
+                                if hasattr(home.ids, "status_icon"):
+                                    home.ids.status_icon.icon = "check-circle"
+                                if hasattr(home.ids, "api_endpoint_lbl"):
+                                    home.ids.api_endpoint_lbl.text = f"Endpoint ({net_type}): {preferred_endpoint}"
                                 self.show_toast_msg("API Server Started")
                             Clock.schedule_once(update_started_ui)
 
@@ -331,15 +311,33 @@ class OpenSmsApp(MDApp):
                             self.release_wakelock()
                             # Thread-safe UI update
                             def update_stopped_ui(dt):
-                                home = self.root.ids.home_scr.ids
-                                home.api_srv_lbl.text = "API Server is not running"
-                                home.api_srv_btn.btn_icon = "play"
-                                home.api_srv_btn.btn_txt = "Start Server"
-                                home.api_srv_btn.btn_colour = "green"
-                                if hasattr(home, "status_icon"):
-                                    home.status_icon.icon = "cellphone-wireless"
+                                home = self.root.ids.home_scr
+                                home.is_online = False
+                                home.ids.api_srv_lbl.text = "GATEWAY STANDBY"
+                                home.ids.api_port_sublbl.text = f"Port {port} • Tap Start Server below"
+                                home.ids.api_srv_btn.btn_icon = "play"
+                                home.ids.api_srv_btn.btn_txt = "Start Server"
+                                home.ids.api_srv_btn.btn_colour = "green"
+                                if hasattr(home.ids, "status_icon"):
+                                    home.ids.status_icon.icon = "cellphone-wireless"
                                 self.show_toast_msg("API Server Stopped")
                             Clock.schedule_once(update_stopped_ui)
+
+                        elif server_stat == "error":
+                            error_detail = resp.get("error", "Port conflict or bind error")
+                            if self.api_started:
+                                self.api_started = False
+                                self.release_wakelock()
+                            def update_error_ui(dt):
+                                home = self.root.ids.home_scr
+                                home.is_online = False
+                                home.ids.api_srv_lbl.text = "SERVER ERROR"
+                                home.ids.api_port_sublbl.text = f"Error: {error_detail}"
+                                home.ids.api_srv_btn.btn_icon = "play"
+                                home.ids.api_srv_btn.btn_txt = "Start Server"
+                                home.ids.api_srv_btn.btn_colour = "green"
+                                self.show_toast_msg(f"Server Error: {error_detail}", is_error=True)
+                            Clock.schedule_once(update_error_ui)
 
                 except Exception as e:
                     # Ignore transient read collisions while file is being written
@@ -547,6 +545,7 @@ class OpenSmsApp(MDApp):
         boot = self.config_template["boot"]
         print(f"Service configuration saved: boot={boot}, port={port}")
         Thread(target=self.write_app_conf, daemon=True).start()
+        Thread(target=self.write_request, daemon=True).start()
         self.update_network_addresses()
         Clock.schedule_once(lambda dt: self.show_toast_msg("Settings saved successfully."))
 
@@ -608,6 +607,7 @@ class OpenSmsApp(MDApp):
         self.refresh_settings_view()
         self.update_network_addresses()
         Thread(target=self.write_app_conf, daemon=True).start()
+        Thread(target=self.write_request, daemon=True).start()
         Clock.schedule_once(lambda dt: self.show_toast_msg("Settings reset to defaults."))
 
     ## Wakelock handling
@@ -681,6 +681,7 @@ class OpenSmsApp(MDApp):
 
     ## Test SMS Dialog
     def show_test_sms_dialog(self, instance=None):
+        from kivymd.uix.label import MDLabel
         phone_input = MDTextField(
             mode="outlined",
             hint_text="Phone Number (e.g. +1234567890)",
@@ -695,20 +696,37 @@ class OpenSmsApp(MDApp):
             size_hint_y=None,
             height=dp(56)
         )
+
+        calc_init = calculate_sms_segments(msg_input.text)
+        metrics_lbl = MDLabel(
+            text=f"{calc_init['length']} chars • {calc_init['segments']} segment(s) ({calc_init['encoding']})",
+            font_style="Label",
+            role="small",
+            theme_text_color="Secondary",
+            adaptive_height=True
+        )
+
+        def on_msg_change(inst, val):
+            c = calculate_sms_segments(val)
+            metrics_lbl.text = f"{c['length']} chars • {c['segments']} segment(s) ({c['encoding']})"
+
+        msg_input.bind(text=on_msg_change)
+
         content_box = MDBoxLayout(
             phone_input,
             msg_input,
+            metrics_lbl,
             orientation="vertical",
-            spacing=dp(12),
+            spacing=dp(10),
             adaptive_height=True
         )
         content_container = MDDialogContentContainer(content_box)
 
         def do_send(inst):
-            phone = phone_input.text.strip()
+            phone = sanitize_phone_number(phone_input.text)
             msg = msg_input.text.strip()
             if not phone or not msg:
-                self.show_toast_msg("Phone and message cannot be empty", is_error=True)
+                self.show_toast_msg("Valid phone number and message cannot be empty", is_error=True)
                 return
             self.txt_dialog_closer()
             self.show_toast_msg(f"Sending test SMS to {phone}...")
@@ -736,47 +754,14 @@ class OpenSmsApp(MDApp):
         )
         self.show_text_dialog(
             "Send Test SMS",
-            "Verify your SIM card, cellular carrier, and Android permissions directly.",
+            "Verify your cellular carrier, SIM card, and SMS permissions directly.",
             content_container,
             buttons
         )
 
     ## VPN & Remote Access Guide Dialog
     def show_vpn_guide_dialog(self, instance=None):
-        guide_text = (
-            "How to connect across 2 different networks:\n\n"
-            "Option 1: Tailscale VPN (Recommended & Free)\n"
-            "• Install Tailscale on this Android phone and your remote machine/server.\n"
-            "• Log in to the same Tailscale account.\n"
-            "• Your phone gets a private IP (e.g. 100.85.x.x).\n"
-            "• Send SMS from anywhere in the world using http://100.x.x.x:9292/sms/ !\n\n"
-            "Option 2: Reverse SSH Tunnel\n"
-            "• In Termux on this phone, run:\n"
-            "  ssh -R 9292:localhost:9292 user@your-vps.com\n"
-            "• Your VPS can now forward requests to your phone.\n\n"
-            "Option 3: WireGuard / OpenVPN\n"
-            "• Connect this phone to your home/office VPN server."
-        )
-        buttons = MDDialogButtonContainer(
-            Widget(),
-            MDButton(
-                MDButtonText(text="Copy Guide"),
-                style="text",
-                on_release=lambda x: [Clipboard.copy(guide_text), self.show_toast_msg("Guide copied to clipboard!")]
-            ),
-            MDButton(
-                MDButtonText(text="Close"),
-                style="text",
-                on_release=self.txt_dialog_closer
-            ),
-            spacing="8dp",
-        )
-        self.show_text_dialog(
-            "VPN & Cross-Network Guide",
-            guide_text,
-            None,
-            buttons
-        )
+        self.goto_tailscale_screen()
 
     def show_about_dialog(self, instance=None):
         about_text = (
@@ -784,6 +769,7 @@ class OpenSmsApp(MDApp):
             "An open-source solution to host an SMS API gateway on your Android device.\n\n"
             "• Privacy focused, no ads, no trackers\n"
             "• Compatible with Android 7.0 (API 24) to Android 15+\n"
+            "• Tailscale WireGuard Mesh integration for multi-network cross-connect\n"
             "• Supports local Wi-Fi, VPN mesh, and multi-network routing"
         )
         buttons = MDDialogButtonContainer(
@@ -804,20 +790,27 @@ class OpenSmsApp(MDApp):
 
     ## Drawer action hooks
     def open_test_sms_from_drawer(self):
-        self.root.ids.nav_drawer.set_state("close")
+        if hasattr(self.root.ids, "nav_drawer"):
+            self.root.ids.nav_drawer.set_state("close")
         Clock.schedule_once(lambda dt: self.show_test_sms_dialog(), 0.2)
 
     def open_vpn_guide_from_drawer(self):
-        self.root.ids.nav_drawer.set_state("close")
-        Clock.schedule_once(lambda dt: self.show_vpn_guide_dialog(), 0.2)
+        self.goto_tailscale_screen()
 
     def open_about_from_drawer(self):
-        self.root.ids.nav_drawer.set_state("close")
+        if hasattr(self.root.ids, "nav_drawer"):
+            self.root.ids.nav_drawer.set_state("close")
         Clock.schedule_once(lambda dt: self.show_about_dialog(), 0.2)
 
     def goto_logs_screen(self, instance=None):
-        self.root.ids.nav_drawer.set_state("close")
+        if hasattr(self.root.ids, "nav_drawer"):
+            self.root.ids.nav_drawer.set_state("close")
         self.go_to_screen("Logs")
+
+    def goto_tailscale_screen(self, instance=None):
+        if hasattr(self.root.ids, "nav_drawer"):
+            self.root.ids.nav_drawer.set_state("close")
+        self.go_to_screen("Mesh")
 
     def go_to_screen(self, screen: str):
         self.root.ids.screen_manager.current = screen
@@ -827,12 +820,19 @@ class OpenSmsApp(MDApp):
         self.root.ids.top_back_btn.disabled = True
         self.update_network_addresses()
 
+    def on_tailscale_screen_entry(self, instance=None):
+        self.root.ids.top_back_btn.opacity = 1
+        self.root.ids.top_back_btn.disabled = False
+        port = self.req_template.get("port", 9292)
+        if hasattr(self.root.ids, "tailscale_scr"):
+            self.root.ids.tailscale_scr.update_tailscale_info(port=port)
+
     def on_settings_entry(self, instance=None):
         self.root.ids.top_back_btn.opacity = 1
         self.root.ids.top_back_btn.disabled = False
 
     def back_button_action(self, instance=None):
-        if self.root.ids.screen_manager.current in ["Settings", "Logs"]:
+        if self.root.ids.screen_manager.current in ["Settings", "Logs", "Mesh"]:
             self.go_to_screen("SMS")
 
     def events(self, instance, keyboard, keycode, text, modifiers):
@@ -841,7 +841,7 @@ class OpenSmsApp(MDApp):
             if self.txt_dialog:
                 self.txt_dialog_closer()
                 return True
-            if self.root.ids.screen_manager.current in ["Settings", "Logs"]:
+            if self.root.ids.screen_manager.current in ["Settings", "Logs", "Mesh"]:
                 self.back_button_action()
                 return True
         return False
@@ -863,3 +863,4 @@ class OpenSmsApp(MDApp):
 
 if __name__ == '__main__':
     OpenSmsApp().run()
+

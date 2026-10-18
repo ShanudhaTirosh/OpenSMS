@@ -11,13 +11,14 @@ Developed & maintained by **[Shanudha Tirosh](https://info.shanutechx.com)**.
 ### ✨ Key Features
 
 - 📱 **Turns your Android device into an SMS REST API gateway**.
-- 🌐 **Cross-Network & VPN Ready**: Works across different networks and worldwide via **Tailscale**, **WireGuard**, **Cloudflare Tunnel**, or **Reverse SSH Tunnels**.
+- 🌐 **Native Cross-Network Mesh (Tailscale Ready)**: Seamlessly connects across 2 different networks (cellular CGNAT, home Wi-Fi, remote cloud VPS, laptop, or backend servers) without open ports or port forwarding.
+- ⚡ **Built-In Client Code Generator**: Generate copy-paste client code snippets in **cURL**, **Python (requests)**, **Node.js (fetch)**, **PHP (cURL)**, and **Go** directly from the in-app Remote Mesh tab.
 - 🔒 **Privacy Focused & Secure**: No third-party data tracking, no ads. Built-in SHA-256 API token authentication and brute-force rate-limiting.
-- 📦 **Batch SMS Support**: Send multiple SMS messages in a single API call via `/sms/batch/`.
-- 💬 **Long / Multipart SMS Support**: Automatic message splitting with `divideMessage` and `sendMultipartTextMessage` (messages >160 characters won't be truncated).
+- 📦 **Batch SMS Support**: Send up to 100 SMS messages in a single API call via `/sms/batch/` with automated rate pacing (100ms) to prevent carrier throttling.
+- 💬 **Smart Telephony & Segmentation**: Automatic phone number sanitization (stripping spaces, brackets, hyphens) and real-time GSM-7 (160 chars) vs UCS-2 (70 chars) multipart SMS segment calculation.
 - 📱 **Wide Device Compatibility**: Supports Android 7.0 (API 24) up to Android 15+ (API 36), with both 64-bit (`arm64-v8a`) and 32-bit (`armeabi-v7a`) ARM architectures.
-- 🧪 **Built-In In-App Test SMS**: Test phone carrier signal and permissions directly from the app UI without terminal commands.
-- 🌙 **Modern Material 3 UI**: Includes Dark Theme, active IP addresses display, quick-copy API endpoints, and real-time logs.
+- 🧪 **Built-In Test SMS & Live Metrics**: Test carrier signal, permissions, and inspect SMS character encoding and segment metrics in-app.
+- 🌙 **Modern Material 3 UI**: Live Gateway Hero card with active status pills, dynamic port change auto-restart, and a high-performance log viewer protected against Android OpenGL texture crashes with category filters (All, Errors, SMS).
 
 ---
 
@@ -67,18 +68,33 @@ curl http://<DEVICE_IP>:9292/health/
 
 ---
 
-## 🌐 Connecting Across Different Networks (VPN & Remote Access)
+## 🌐 Connecting Across Different Networks (Mesh & Remote Access)
 
-If your client (e.g. server, cloud VPS, laptop) is on a **different network** than your phone:
+When your phone is on cellular data (CGNAT) or home Wi-Fi and your program/backend runs on a remote server, cloud VPS, or laptop on a **completely different network**, you have several easy options:
 
-### Option 1: Tailscale (Recommended & Zero-Config)
-1. Install [Tailscale](https://tailscale.com) on your Android phone and on your remote machine/server.
-2. Log into the same account on both devices.
-3. OpenSMS will display your phone's private Tailscale IP (e.g., `100.85.x.x`).
-4. You can now send SMS from anywhere in the world:
-   ```bash
-   curl -X POST 'http://100.85.x.x:9292/sms/' ...
-   ```
+### Option 1: Tailscale Mesh (Recommended & Zero-Config)
+1. Install [Tailscale](https://tailscale.com) on your Android phone and on your remote server/laptop.
+2. Log into the same Tailscale tailnet on both devices.
+3. Open **OpenSMS** and navigate to the **Mesh** tab at the bottom navigation bar.
+4. OpenSMS automatically detects the `100.x.y.z` Tailscale CGNAT IP address and shows the **Tailscale Mesh Connected** badge.
+5. In the **Mesh** screen, select your language (**cURL**, **Python**, **Node.js**, **PHP**, or **Go**) to instantly generate ready-to-use code targeting your remote endpoint!
+
+```python
+# Example: Sending SMS from a remote server anywhere in the world to your phone
+import requests
+
+url = "http://100.85.x.x:9292/sms/"
+headers = {
+    "Authorization": "Bearer your-secret-api-key",
+    "Content-Type": "application/json"
+}
+payload = {
+    "number": "+1234567890",
+    "text": "Alert from Cloud Server dispatched via OpenSMS!"
+}
+response = requests.post(url, json=payload, headers=headers)
+print(response.json())
+```
 
 ### Option 2: Reverse SSH Tunnel
 Run a reverse tunnel from Termux on your phone to your VPS:

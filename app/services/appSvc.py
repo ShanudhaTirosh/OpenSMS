@@ -54,23 +54,23 @@ resp_file = join(config_dir, "resp.json")
 ## global obj
 app_api_server = PosiApiServer()
 
-## functions
-def atomic_write_json(file_path: str, data: dict):
-    """Write data to temporary file and atomically replace to avoid corrupt reads."""
-    import os
-    tmp_path = file_path + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as tf:
-            json.dump(data, tf)
-            tf.flush()
-            os.fsync(tf.fileno())
-        os.replace(tmp_path, file_path)
-    except Exception as e:
-        print(f"Error atomic writing {file_path}: {e}")
+def on_server_control_event(event_type: str, detail: str = ""):
+    global api_started
+    global resp_template
+    print(f"Server control event: {event_type} - {detail}")
+    if "error" in event_type:
+        api_started = False
+        resp_template["server"] = "error"
+        resp_template["error"] = detail
+        write_resp()
 
+app_api_server.set_control_caller(on_server_control_event)
+
+## functions
 def write_resp():
     """ Write the response json on file atomically. """
     global resp_template
+    from services.pathMgr import atomic_write_json
     atomic_write_json(resp_file, resp_template)
 
 def read_req_file():
@@ -84,51 +84,59 @@ def read_req_file():
             # Ignore transient read collisions while file is being replaced
             pass
 
-def api_server_control(api_stat: str):
+def api_server_control(api_stat: str, port: int = 9292):
     """ Turns API server on/off """
     global api_started
     global resp_template
-    global req_data
-    port = req_data.get("port", 9292)
     print(f"Service control: {api_stat} on port {port}")
     if api_stat == "stop":
         app_api_server.stop()
         api_started = False
         resp_template["server"] = "stopped"
         resp_template["port"] = port
+        resp_template.pop("error", None)
     elif api_stat == "start":
         app_api_server.start(port)
         api_started = True
         resp_template["server"] = "started"
         resp_template["port"] = port
+        resp_template.pop("error", None)
     Thread(target=write_resp, daemon=True).start()
 
 
 def app_service_thread():
     """
-    The main service thready runs forever till the app is running & performs the operations.
+    The main service thread runs forever while the app is running & executes operations.
     """
-    #global vars
     global api_started
+    global req_data
+    current_port = 9292
 
-    write_resp() # blank the old file
-    #api_server_control("start") # api server starts automatically
+    write_resp()
 
-    # keep alive the service & check for requests
     while True:
         read_req_file()
 
-        #handle api server
         server_stat = req_data.get("server", "")
-        if not api_started and server_stat == "start":
-            api_server_control("start")
-        elif api_started and server_stat == "stop":
-            api_server_control("stop")
+        requested_port = int(req_data.get("port", 9292))
 
-        # put a sleep
+        # Handle port change while running
+        if api_started and requested_port != current_port and server_stat == "start":
+            print(f"Port changed from {current_port} to {requested_port}. Restarting server...")
+            api_server_control("stop", current_port)
+            time.sleep(0.5)
+            current_port = requested_port
+            api_server_control("start", current_port)
+        elif not api_started and server_stat == "start":
+            current_port = requested_port
+            api_server_control("start", current_port)
+        elif api_started and server_stat == "stop":
+            api_server_control("stop", current_port)
+
         time.sleep(0.2)
 
 
 # run locally
 if __name__ == "__main__":
     app_service_thread()
+

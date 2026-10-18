@@ -157,3 +157,67 @@ def test_device_ip_discovery():
     ips = get_device_ip_addresses()
     assert isinstance(ips, list)
     assert len(ips) >= 1
+
+def test_phone_sanitization():
+    from services.smsApi import sanitize_phone_number
+    assert sanitize_phone_number("+1 (555) 019-2834") == "+15550192834"
+    assert sanitize_phone_number("077-123-4567") == "0771234567"
+    assert sanitize_phone_number("+44 20 7946 0991") == "+442079460991"
+    assert sanitize_phone_number("") == ""
+
+def test_sms_segmentation_calculation():
+    from services.smsApi import calculate_sms_segments
+    # Short GSM-7
+    gsm_short = calculate_sms_segments("Hello world!")
+    assert gsm_short["encoding"] == "GSM-7"
+    assert gsm_short["segments"] == 1
+    assert gsm_short["remaining"] == 160 - 12
+
+    # Long GSM-7 (161 chars)
+    gsm_long = calculate_sms_segments("A" * 161)
+    assert gsm_long["encoding"] == "GSM-7"
+    assert gsm_long["segments"] == 2
+
+    # Unicode with emoji (UCS-2)
+    unicode_msg = calculate_sms_segments("Hello 🚀")
+    assert "UCS-2" in unicode_msg["encoding"]
+    assert unicode_msg["segments"] == 1
+
+def test_tailscale_ip_detection():
+    from services.pathMgr import is_tailscale_ip
+    assert is_tailscale_ip("100.85.24.12") is True
+    assert is_tailscale_ip("100.64.0.1") is True
+    assert is_tailscale_ip("100.127.255.254") is True
+    assert is_tailscale_ip("100.128.0.1") is False  # Outside 100.64.0.0/10
+    assert is_tailscale_ip("192.168.1.100") is False
+    assert is_tailscale_ip("127.0.0.1") is False
+    assert is_tailscale_ip("invalid_ip") is False
+
+def test_tailscale_service_snippets():
+    from services.tailscaleSvc import TailscaleService
+    snippets = TailscaleService.generate_code_snippets(
+        endpoint="http://100.85.12.34:9292/sms/",
+        api_key="osms_test_key_123",
+        phone="+1234567890",
+        text="Test message"
+    )
+    assert "curl" in snippets
+    assert "python" in snippets
+    assert "nodejs" in snippets
+    assert "osms_test_key_123" in snippets["curl"]
+    assert "http://100.85.12.34:9292/sms/" in snippets["python"]
+
+def test_batch_sms_max_limit():
+    from services.postApi import BatchSmsData, SmsData
+    valid_msgs = [SmsData(number="+1234567890", text="Test") for _ in range(5)]
+    batch = BatchSmsData(messages=valid_msgs)
+    assert len(batch.messages) == 5
+
+    # Exceeding 100 should raise ValueError
+    too_many = [SmsData(number="+1234567890", text="Test") for _ in range(101)]
+    with pytest.raises(ValueError):
+        BatchSmsData(messages=too_many)
+
+    with pytest.raises(ValueError):
+        BatchSmsData(messages=[])
+

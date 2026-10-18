@@ -2,6 +2,18 @@
 
 ## Changes
 
+### 0.3.0
+- **Tailscale Mesh Hub & Cross-Network Integration**: Added dedicated Remote Mesh hub with live Tailscale status detection, Tailscale CGNAT (`100.64.0.0/10`) interface recognition, and remote endpoint discovery.
+- **Multi-Language Client Code Generator**: Built-in 1-tap code generator producing pre-configured connection code for cURL, Python (`requests`), Node.js (`fetch`), PHP (`curl`), and Go (`net/http`).
+- **Comprehensive Network Interface Discovery**: Native `NetworkInterface` enumeration on Android and multi-target routing detection classifying Wi-Fi, Ethernet, Cellular, and Tailscale interfaces.
+- **Dynamic Port Synchronization & Error Recovery**: Port changes in Settings now trigger immediate service restarts; added `OSError` port-bind exception handling to prevent silent background server crashes.
+- **Enhanced Telephony & Dialable Phone Sanitization**: Dialable phone numbers with dashes, spaces, and brackets are automatically sanitized to standard E.164 digits, eliminating carrier rejection on OEM modems.
+- **Live SMS Segmentation Calculator**: In-app Test SMS modal displays real-time character count, segment count, and encoding indicators (GSM-7 160 vs UCS-2 70 Unicode).
+- **Batch SMS Enhancements**: Added 100-message payload limits, 100ms rate-pacing delay to prevent cellular baseband saturation, and UI event callbacks.
+- **Bounded Log Viewer & Filtering**: Prevented Android GPU texture overflow crashes on Qualcomm Adreno devices by bounding log rendering; added instant filters for All, Errors, and SMS.
+- **Rate-Limiter Memory Leak Fix**: Periodic eviction of expired IP entries prevents memory leaks during long-running gateway operations.
+- **Modern Material 3 UI Overhaul**: Redesigned gateway dashboard with live status pills (Online/Standby), network cards, and elevated theme-aware color styling.
+
 ### 0.2.0
 - Added multi-network and VPN discovery (displays Wi-Fi, Ethernet, and Tailscale/WireGuard mesh IPs)
 - Added built-in VPN & Cross-Network Guide (step-by-step for Tailscale, WireGuard, SSH reverse tunnel)

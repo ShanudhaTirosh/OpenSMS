@@ -115,11 +115,20 @@ class SmsData(BaseModel):
 class BatchSmsData(BaseModel):
     messages: list[SmsData]
 
+    @field_validator('messages')
+    @classmethod
+    def validate_batch_size(cls, v: list[SmsData]) -> list[SmsData]:
+        if not v:
+            raise ValueError("Batch cannot be empty.")
+        if len(v) > 100:
+            raise ValueError("Batch size exceeds maximum limit of 100 messages per request.")
+        return v
+
 class ControlData(BaseModel):
     api: str
 
 # FastAPI app
-app = FastAPI(title="OpenSMS API", version="0.2.0")
+app = FastAPI(title="OpenSMS API", version="0.3.0")
 security = HTTPBearer(auto_error=False)
 
 # api server class with callback function
@@ -132,6 +141,7 @@ class PosiApiServer:
         self.controlCallback = None
         self.server: uvicorn.Server | None = None
         self.thread: Thread | None = None
+        self.last_error: str | None = None
 
     def set_control_caller(self, callback=None):
         self.controlCallback = callback
@@ -141,16 +151,30 @@ class PosiApiServer:
 
     def _run(self, port=None):
         actual_port = port if port else self.port
-        config = uvicorn.Config(
-            app,
-            host=self.host,
-            port=actual_port,
-            log_level="info",
-            loop="asyncio"
-        )
-        self.server = uvicorn.Server(config)
-        app.state.server = self
-        asyncio.run(self.server.serve())
+        self.last_error = None
+        try:
+            config = uvicorn.Config(
+                app,
+                host=self.host,
+                port=actual_port,
+                log_level="info",
+                loop="asyncio"
+            )
+            self.server = uvicorn.Server(config)
+            app.state.server = self
+            asyncio.run(self.server.serve())
+        except OSError as e:
+            self.last_error = f"Port bind conflict on {actual_port}: {e}"
+            print(f"Error binding to port {actual_port}: {e}")
+            log_activities(f"SERVER ERROR: {self.last_error}")
+            if self.controlCallback:
+                self.controlCallback("bind_error", str(e))
+        except Exception as e:
+            self.last_error = f"Server runtime error: {e}"
+            print(f"Server exception: {e}")
+            log_activities(f"SERVER ERROR: {self.last_error}")
+            if self.controlCallback:
+                self.controlCallback("error", str(e))
 
     def start(self, port=None):
         if self.thread and self.thread.is_alive():
@@ -181,6 +205,13 @@ async def verify_api_key(
 ) -> dict:
     client_ip = request.client.host if request.client else "unknown"
     now = time.time()
+
+    # Periodic cleanup of stale rate-limit entries to prevent memory leak
+    if len(FAILED_AUTH_ATTEMPTS) > 200:
+        cutoff = now - AUTH_LOCKOUT_WINDOW_SECONDS
+        stale = [ip for ip, timestamps in FAILED_AUTH_ATTEMPTS.items() if not timestamps or timestamps[-1] < cutoff]
+        for ip in stale:
+            FAILED_AUTH_ATTEMPTS.pop(ip, None)
 
     # Rate limiting on failed auth attempts
     attempts = [t for t in FAILED_AUTH_ATTEMPTS.get(client_ip, []) if now - t < AUTH_LOCKOUT_WINDOW_SECONDS]
@@ -229,6 +260,7 @@ async def health_check():
     return {
         "status": "online",
         "app": "OpenSMS",
+        "version": "0.3.0",
         "service": "SMS Gateway"
     }
 
@@ -258,7 +290,7 @@ async def process_sms_req(
     if server and server.kivyCallback:
         Thread(
             target=server.kivyCallback,
-            kwargs={"stat": stat},
+            kwargs={"stat": stat, "count": 1},
             daemon=True
         ).start()
 
@@ -274,9 +306,12 @@ async def process_batch_sms_req(
     request: Request,
     client: dict = Depends(verify_api_key)
 ):
+    server = getattr(request.app.state, "server", None)
     results = []
     failed_count = 0
-    for item in batch.messages:
+    total = len(batch.messages)
+
+    for idx, item in enumerate(batch.messages):
         stat = send_sms(item.number, item.text)
         results.append({
             "number": item.number,
@@ -284,11 +319,23 @@ async def process_batch_sms_req(
         })
         if not stat:
             failed_count += 1
+        # Rate-pacing delay (100ms) to prevent baseband buffer saturation
+        if idx < total - 1:
+            await asyncio.sleep(0.1)
 
-    log_activities(f"Batch SMS processed: {len(batch.messages) - failed_count}/{len(batch.messages)} succeeded")
+    successful_count = total - failed_count
+    log_activities(f"Batch SMS processed: {successful_count}/{total} succeeded")
+
+    if server and server.kivyCallback:
+        Thread(
+            target=server.kivyCallback,
+            kwargs={"stat": (failed_count == 0), "count": successful_count},
+            daemon=True
+        ).start()
+
     return {
-        "total": len(batch.messages),
-        "successful": len(batch.messages) - failed_count,
+        "total": total,
+        "successful": successful_count,
         "failed": failed_count,
         "results": results
     }

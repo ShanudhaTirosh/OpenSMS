@@ -46,32 +46,135 @@ def atomic_write_json(file_path: str, data: dict):
     except Exception as e:
         print(f"Error atomic writing {file_path}: {e}")
 
-def get_device_ip_addresses() -> list[str]:
-    """Helper to discover local Wi-Fi, Ethernet, and VPN IP addresses."""
-    import socket
-    ip_list = []
-    # 1. Outbound routing detection
+def is_tailscale_ip(ip: str) -> bool:
+    """Check if an IPv4 address belongs to Tailscale CGNAT range (100.64.0.0/10)."""
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(0.2)
-        s.connect(('8.8.8.8', 80))
-        primary_ip = s.getsockname()[0]
-        s.close()
-        if primary_ip and not primary_ip.startswith('127.'):
-            ip_list.append(primary_ip)
+        parts = [int(p) for p in ip.strip().split(".")]
+        if len(parts) == 4 and parts[0] == 100 and (64 <= parts[1] <= 127):
+            return True
+    except Exception:
+        pass
+    return False
+
+def get_network_interfaces_info() -> dict:
+    """
+    Enumerate network interfaces and classify them (Tailscale, Wi-Fi, LAN, Cellular).
+    Compatible with Android (via PyJNIus java.net.NetworkInterface), Linux, and Windows.
+    """
+    info = {
+        "tailscale_ip": None,
+        "local_ip": None,
+        "cellular_ip": None,
+        "all_ips": [],
+        "interfaces": []
+    }
+    seen_ips = set()
+
+    # 1. Android Java NetworkInterface enumeration (if on Android)
+    try:
+        from jnius import autoclass
+        NetworkInterface = autoclass('java.net.NetworkInterface')
+        interfaces = NetworkInterface.getNetworkInterfaces()
+        if interfaces:
+            while interfaces.hasMoreElements():
+                net_if = interfaces.nextElement()
+                if not net_if.isUp() or net_if.isLoopback():
+                    continue
+                iface_name = str(net_if.getName()).lower()
+                addrs = net_if.getInetAddresses()
+                while addrs.hasMoreElements():
+                    addr = addrs.nextElement()
+                    ip_str = str(addr.getHostAddress())
+                    # Only consider IPv4
+                    if ":" not in ip_str and not ip_str.startswith("127."):
+                        if ip_str not in seen_ips:
+                            seen_ips.add(ip_str)
+                            is_ts = is_tailscale_ip(ip_str) or "tailscale" in iface_name
+                            iface_type = "tailscale" if is_ts else (
+                                "wifi" if any(k in iface_name for k in ["wlan", "wl", "wifi"]) else (
+                                "cellular" if any(k in iface_name for k in ["rmnet", "ccmni", "pdp", "wwan"]) else (
+                                "ethernet" if any(k in iface_name for k in ["eth", "en"]) else "lan"
+                            )))
+                            info["interfaces"].append({
+                                "name": iface_name,
+                                "ip": ip_str,
+                                "type": iface_type,
+                                "is_tailscale": is_ts
+                            })
+                            if is_ts and not info["tailscale_ip"]:
+                                info["tailscale_ip"] = ip_str
+                            elif iface_type == "cellular" and not info["cellular_ip"]:
+                                info["cellular_ip"] = ip_str
+                            elif not info["local_ip"]:
+                                info["local_ip"] = ip_str
     except Exception:
         pass
 
-    # 2. Hostname resolution
+    # 2. Outbound routing detection (Fallback or desktop)
+    import socket
+    for target in [('8.8.8.8', 80), ('1.1.1.1', 80)]:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.2)
+            s.connect(target)
+            primary_ip = s.getsockname()[0]
+            s.close()
+            if primary_ip and not primary_ip.startswith('127.') and primary_ip not in seen_ips:
+                seen_ips.add(primary_ip)
+                is_ts = is_tailscale_ip(primary_ip)
+                if is_ts and not info["tailscale_ip"]:
+                    info["tailscale_ip"] = primary_ip
+                elif not info["local_ip"]:
+                    info["local_ip"] = primary_ip
+                info["interfaces"].append({
+                    "name": "default",
+                    "ip": primary_ip,
+                    "type": "tailscale" if is_ts else "lan",
+                    "is_tailscale": is_ts
+                })
+                break
+        except Exception:
+            pass
+
+    # 3. Hostname resolution fallback
     try:
         hostname = socket.gethostname()
         for ip in socket.gethostbyname_ex(hostname)[2]:
-            if ip not in ip_list and not ip.startswith('127.'):
-                ip_list.append(ip)
+            if ip not in seen_ips and not ip.startswith('127.'):
+                seen_ips.add(ip)
+                is_ts = is_tailscale_ip(ip)
+                if is_ts and not info["tailscale_ip"]:
+                    info["tailscale_ip"] = ip
+                elif not info["local_ip"]:
+                    info["local_ip"] = ip
+                info["interfaces"].append({
+                    "name": "host",
+                    "ip": ip,
+                    "type": "tailscale" if is_ts else "lan",
+                    "is_tailscale": is_ts
+                })
     except Exception:
         pass
 
-    if not ip_list:
-        ip_list.append("127.0.0.1")
-    return ip_list
+    # Order IPs: Tailscale first, then Local LAN, then others
+    ordered_ips = []
+    if info["tailscale_ip"]:
+        ordered_ips.append(info["tailscale_ip"])
+    if info["local_ip"] and info["local_ip"] not in ordered_ips:
+        ordered_ips.append(info["local_ip"])
+    for ip in seen_ips:
+        if ip not in ordered_ips:
+            ordered_ips.append(ip)
+
+    if not ordered_ips:
+        ordered_ips.append("127.0.0.1")
+
+    info["all_ips"] = ordered_ips
+    return info
+
+def get_device_ip_addresses() -> list[str]:
+    """Helper to discover all active IP addresses, prioritizing Tailscale and LAN."""
+    net_info = get_network_interfaces_info()
+    return net_info["all_ips"]
+
 
