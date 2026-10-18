@@ -12,7 +12,7 @@ title = OpenSMS
 package.name = opensms
 
 # (str) Package domain (needed for android/ios packaging)
-package.domain = in.daslearning
+package.domain = com.shanutechx
 
 # (str) Source code where the main.py live
 source.dir = .
@@ -104,7 +104,7 @@ services = opensmssvc:services/appSvc.py:foreground:foregroundServiceType=dataSy
 #
 
 #
-# author = © Copyright Info
+author = Shanudha Tirosh (https://info.shanutechx.com)
 
 # Kivy version to use
 osx.kivy_version = 2.2.0
@@ -144,7 +144,7 @@ android.permissions = android.permission.INTERNET, android.permission.SEND_SMS, 
 android.api = 36
 
 # (int) Minimum API your APK / AAB will support.
-android.minapi = 28
+android.minapi = 24
 
 # (int) Android SDK version to use
 #android.sdk = 20
@@ -323,7 +323,7 @@ android.manifest.orientation = fullSensor
 
 # (list) The Android archs to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
 # In past, was `android.arch` as we weren't supporting builds for multiple archs at the same time.
-android.archs = arm64-v8a
+android.archs = armeabi-v7a, arm64-v8a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # this is not the same as app version and should only be edited if you know what you're doing

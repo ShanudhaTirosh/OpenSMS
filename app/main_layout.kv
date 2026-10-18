@@ -82,16 +82,37 @@ MDScreen:
 
                     MDNavigationDrawerMenu:
                         MDNavigationDrawerLabel:
-                            text: "Operations"
+                            text: "Tools & Operations"
                         MDNavigationDrawerItem:
                             on_release: app.goto_logs_screen()
                             MDNavigationDrawerItemLeadingIcon:
-                                icon: "file"
+                                icon: "text-box-search"
                             MDNavigationDrawerItemText:
-                                text: "Logs"
-                            #MDNavigationDrawerItemTrailingText:
-                            #    text: "24"
+                                text: "API Logs"
+
+                        MDNavigationDrawerItem:
+                            on_release: app.open_test_sms_from_drawer()
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "message-plus"
+                            MDNavigationDrawerItemText:
+                                text: "Send Test SMS"
+
+                        MDNavigationDrawerItem:
+                            on_release: app.open_vpn_guide_from_drawer()
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "vpn"
+                            MDNavigationDrawerItemText:
+                                text: "VPN & Remote Access"
+
                         MDNavigationDrawerDivider:
+
+                        MDNavigationDrawerItem:
+                            on_release: app.open_about_from_drawer()
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "information"
+                            MDNavigationDrawerItemText:
+                                text: "About OpenSMS"
+
 
             MDNavigationBar:
                 id: btm_nav_bar

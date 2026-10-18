@@ -1,88 +1,136 @@
 <p align="center"><img width="20%" src="app/data/images/favicont512.png" /></p>
 
 # 📨 OpenSMS
-An open-source solution to host a `SMS` API server locally.
 
-### 🤔 Why would you choose our app? (Features)
-👉 Turns your `Android` phone into a SMS API server. <br>
-👉 Open-source, No advertisements and privacy focused.
+An open-source, privacy-first Android application that turns your Android phone into a high-performance **SMS Gateway & REST API server**.
 
-## 💰 Sponsor Me
-You can buy me a coffee via [this link](https://www.paypal.com/paypalme/soomnathsdas) or tap on below image. Thank you 🙏. <br>
-<a href="https://www.paypal.com/paypalme/soomnathsdas"><img src="./docs/images/donate.svg" height="40"></a>
+Developed & maintained by **[Shanudha Tirosh](https://info.shanutechx.com)**.
 
-## 📽️ Demo
-You can click on the below Image or this [Youtube Link](https://www.youtube.com/watch?v=wNXH_3onjfg) to see the demo. Please let me know in the comments, how do you feel about this App. <br>
+---
 
-<a href="https://www.youtube.com/watch?v=wNXH_3onjfg"><img src="docs/images/OpenSmsThumb.webp" width="70%"></a>
+### ✨ Key Features
+
+- 📱 **Turns your Android device into an SMS REST API gateway**.
+- 🌐 **Cross-Network & VPN Ready**: Works across different networks and worldwide via **Tailscale**, **WireGuard**, **Cloudflare Tunnel**, or **Reverse SSH Tunnels**.
+- 🔒 **Privacy Focused & Secure**: No third-party data tracking, no ads. Built-in SHA-256 API token authentication and brute-force rate-limiting.
+- 📦 **Batch SMS Support**: Send multiple SMS messages in a single API call via `/sms/batch/`.
+- 💬 **Long / Multipart SMS Support**: Automatic message splitting with `divideMessage` and `sendMultipartTextMessage` (messages >160 characters won't be truncated).
+- 📱 **Wide Device Compatibility**: Supports Android 7.0 (API 24) up to Android 15+ (API 36), with both 64-bit (`arm64-v8a`) and 32-bit (`armeabi-v7a`) ARM architectures.
+- 🧪 **Built-In In-App Test SMS**: Test phone carrier signal and permissions directly from the app UI without terminal commands.
+- 🌙 **Modern Material 3 UI**: Includes Dark Theme, active IP addresses display, quick-copy API endpoints, and real-time logs.
+
+---
 
 ## 🧑‍💻 Quickstart Guide
 
-### 📱 Download & Run the Android App
-1. You can check the [Releases](https://github.com/daslearning-org/OpenSMS/releases) and downlaod the latest version of the android app on your phone.
-2. You may need to disable (temporarily) `Play Protect` from your `Play Store` settings.
-3. Install the App & launch.
-4. Grant the permissions.
-5. Android might block `sms` permission. Go to `Settings` > `Apps` > `OpenSMS` > Tap on three vertical-dots at top-right corner > `Allow restricted access`.
-6. Then grant `SMS` permission from the settings window.
-7. Relaunch the app. 
-8. Click `Start Server`. It will then prompt you to generate an API Key for the first time. Generate and store it securely.
+### 1. Download & Install
+1. Download the latest APK from the [Releases](https://github.com/ShanudhaTirosh/OpenSMS/releases) page.
+2. Install the APK on your Android device (temporarily allow installation from unknown sources or Play Protect prompt).
+3. Open **OpenSMS** and grant SMS, WakeLock, and Notification permissions.
+4. Android may restrict background SMS permissions on newer Android versions:
+   - Go to `Settings` > `Apps` > `OpenSMS` > Tap top-right three dots `⋮` > **Allow restricted settings**.
+   - Ensure **SMS** permission is allowed.
 
-### 🧪 Test API endpoint
-Find the network address of your device and you may test out the API. Sample given below.
+### 2. Start the Server & Generate API Key
+1. Tap **Start Server**.
+2. If this is your first time, you will be prompted to **Generate an API Key**.
+3. Tap **Generate** and then **Copy Key** to store it securely.
 
+### 3. Send SMS via API
+Your device's active network IP addresses (Wi-Fi, VPN, or cellular) are displayed on the home screen.
+
+#### Single SMS
 ```bash
-curl -i -X POST 'http://127.0.0.1:9292/sms/' \
-    -H 'Content-Type: application/json' \
-    -H 'Authorization: Bearer my-secret-api-key' \
-    -d '{"number": "+1234567890", "text": "Hello from OpenSMS API!"}'
+curl -i -X POST 'http://<DEVICE_IP>:9292/sms/' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer your-secret-api-key' \
+  -d '{"number": "+1234567890", "text": "Hello from OpenSMS API!"}'
 ```
 
-## 📚 Tech Stack Used
+#### Batch SMS (Multiple Recipients)
+```bash
+curl -i -X POST 'http://<DEVICE_IP>:9292/sms/batch/' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer your-secret-api-key' \
+  -d '{
+    "messages": [
+      {"number": "+1234567890", "text": "Alert 1"},
+      {"number": "+0987654321", "text": "Alert 2"}
+    ]
+  }'
+```
 
-### Python stack
-It works on `Android` and will bring this to `Linux` & `Windows` too.
-- [FastAPI](https://github.com/fastapi/fastapi) for the API layer.
-- [KivyMD](https://github.com/kivymd/kivymd) and few [Kivy](https://github.com/kivy) components for the UI and building the app.
+#### Health Check
+```bash
+curl http://<DEVICE_IP>:9292/health/
+```
 
-### 📋 Future plans
+---
 
-1. Bring this SMS API option to Desktop platforms. We will leverage [Quectel EC200U](https://www.quectel.com/product/lte-ec200u-series/) based USB development boards to send SMS.
+## 🌐 Connecting Across Different Networks (VPN & Remote Access)
 
------
+If your client (e.g. server, cloud VPS, laptop) is on a **different network** than your phone:
 
-## 🧩 Building your app from code
+### Option 1: Tailscale (Recommended & Zero-Config)
+1. Install [Tailscale](https://tailscale.com) on your Android phone and on your remote machine/server.
+2. Log into the same account on both devices.
+3. OpenSMS will display your phone's private Tailscale IP (e.g., `100.85.x.x`).
+4. You can now send SMS from anywhere in the world:
+   ```bash
+   curl -X POST 'http://100.85.x.x:9292/sms/' ...
+   ```
 
-### 📱 Build Android App
-A Linux environment is recommended for the app development. If you are on Windows, you may use `WSL` or any `Virtual Machine`.
+### Option 2: Reverse SSH Tunnel
+Run a reverse tunnel from Termux on your phone to your VPS:
+```bash
+ssh -R 9292:localhost:9292 user@your-vps.com
+```
+Now requests sent to `http://localhost:9292/sms/` on your VPS will route directly to your phone.
+
+### Option 3: Cloudflare Tunnel / Bore / Ngrok
+Expose port 9292 via your preferred tunneling tool to get a public HTTPS endpoint.
+
+---
+
+## 📚 Tech Stack
+
+- **API Layer**: [FastAPI](https://github.com/fastapi/fastapi) & [Uvicorn](https://github.com/encode/uvicorn)
+- **UI Framework**: [Kivy](https://github.com/kivy/kivy) & [KivyMD](https://github.com/kivymd/kivymd) (Material 3)
+- **Telephony**: Android Native `SmsManager` via PyJNIus with multi-part SMS support
+
+---
+
+## 🧩 Building the APK from Source
+
+### Prerequisites
+A Linux environment or WSL2 on Windows with Java 17 and Python 3.10/3.11.
 
 ```bash
-# add the python repository (Optional: if you want some other versions)
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt update
-
-# install all dependencies.
-sudo apt install -y ant autoconf automake ccache cmake g++ gcc lbzip2 libffi-dev libltdl-dev libtool libssl-dev make openjdk-17-jdk patch patchelf pkg-config unzip wget zip git python3 python3-venv python3-dev libcairo2-dev pkg-config libjpeg-dev zlib1g-dev
-
-# optionally you may check the java installation with below commands
-java -version
-javac -version
-
-# install python modules
-git clone https://github.com/daslearning-org/OpenSMS.git
+# Clone the repository
+git clone https://github.com/ShanudhaTirosh/OpenSMS.git
 cd OpenSMS/app
-python3 -m venv .env # create python virtual environment
+
+# Set up virtual environment
+python3 -m venv .env
 source .env/bin/activate
 pip install -r req_android.txt
 
-# build the android apk
-buildozer android debug # this may take a good amount of time for the first time & will generate the apk in the bin directory
+# Build Android APK using Buildozer
+buildozer android debug
 ```
+The compiled APK will be generated inside the `bin/` directory.
 
------
+---
 
-### Linux Dependencies for build
-```bash
-sudo apt install libcairo2-dev pkg-config python3-dev
-sudo apt-get install libjpeg-dev zlib1g-dev
-```
+## 👤 Author & Support
+
+- **Author**: Shanudha Tirosh
+- **Website**: [info.shanutechx.com](https://info.shanutechx.com)
+- **Email**: [info@shanutechx.com](mailto:info@shanutechx.com)
+- **GitHub**: [@ShanudhaTirosh](https://github.com/ShanudhaTirosh)
+
+---
+
+## 📄 License
+
+This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.

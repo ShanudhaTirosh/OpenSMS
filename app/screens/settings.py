@@ -15,37 +15,36 @@ Builder.load_string('''
 <ApiKeyTxtbox>:
     mode: "outlined"
     readonly: True
-    #MDTextFieldTrailingIcon:
-    #    icon: "content-copy"
-    #    on_release: app.copy_api_key()
 
 <SettingsBox>:
     orientation: "vertical"
+    spacing: dp(8)
 
     MDBoxLayout:
         orientation: "horizontal"
         adaptive_height: True
         adaptive_width: True
-        spacing: dp(2)
+        spacing: dp(12)
         pos_hint: {"center_x": .5}
+        padding: dp(8), dp(4)
 
         MDButton:
             theme_bg_color: "Custom"
             md_bg_color: "green"
             on_release: app.save_settings(self)
             MDButtonIcon:
-                icon: "floppy"
+                icon: "content-save"
                 color: "white"
             MDButtonText:
-                text: "Save"
+                text: "Save Settings"
                 color: "white"
 
         MDButton:
             theme_bg_color: "Custom"
-            md_bg_color: "black"
-            on_release: app.reset_settings(self)
+            md_bg_color: [0.3, 0.3, 0.3, 1]
+            on_release: app.confirm_reset_settings()
             MDButtonIcon:
-                icon: "undo"
+                icon: "restore"
                 color: "white"
             MDButtonText:
                 text: "Reset"
@@ -58,16 +57,16 @@ Builder.load_string('''
             id: main_scroll_bx
             orientation: "vertical"
             adaptive_height: True
+            padding: dp(8), dp(4)
 
+            # Auto Start
             MDListItem:
                 MDListItemLeadingIcon:
                     icon: "rocket-launch"
                 MDListItemHeadlineText:
                     text: "Auto Start API Server"
                 MDListItemSupportingText:
-                    text: "Starts when app is launched"
-                #MDListItemTertiaryText:
-                #    text: "Tertiary text"
+                    text: "Launch gateway automatically on app startup"
                 MDSwitch:
                     id: auto_start_sw
                     pos_hint: {"center_y": 0.5}
@@ -75,32 +74,64 @@ Builder.load_string('''
                     icon_inactive: "close"
                     icon_active_color: "green"
                     track_color_active: "green"
-                    #active: True
                     on_release: app.save_settings(self, "switch")
 
+            # Port Number
             MDListItem:
                 MDListItemLeadingIcon:
-                    icon: "api"
+                    icon: "server-network"
                 MDListItemHeadlineText:
-                    text: "Port Number"
+                    text: "Server Port"
                 MDListItemSupportingText:
-                    text: "Needs a Stop-Start"
-                MDListItemTertiaryText:
-                    text: "Should be > 1024"
+                    text: "Requires restart (1025 - 65535)"
                 MDTextField:
                     id: port_no_inp
                     mode: "filled"
                     input_filter: 'int'
+                    max_text_length: 5
+                    size_hint_x: 0.35
+                    pos_hint: {"center_y": 0.5}
 
+            # Wake Lock
+            MDListItem:
+                MDListItemLeadingIcon:
+                    icon: "battery-charging"
+                MDListItemHeadlineText:
+                    text: "Background WakeLock"
+                MDListItemSupportingText:
+                    text: "Prevent CPU sleep when server is active"
+                MDSwitch:
+                    id: wakelock_sw
+                    pos_hint: {"center_y": 0.5}
+                    icon_active: "check"
+                    icon_inactive: "close"
+                    icon_active_color: "green"
+                    track_color_active: "green"
+                    on_release: app.toggle_wakelock_setting(self)
+
+            # Dark Mode
+            MDListItem:
+                MDListItemLeadingIcon:
+                    icon: "theme-light-dark"
+                MDListItemHeadlineText:
+                    text: "Dark Theme"
+                MDListItemSupportingText:
+                    text: "Switch between Light and Dark theme"
+                MDSwitch:
+                    id: dark_theme_sw
+                    pos_hint: {"center_y": 0.5}
+                    icon_active: "check"
+                    icon_inactive: "close"
+                    on_release: app.toggle_theme(self)
+
+            # API Key Management
             MDListItem:
                 MDListItemLeadingIcon:
                     icon: "key"
                 MDListItemHeadlineText:
-                    text: "API Key"
-                MDListItemSupportingText:
                     text: "Generate New API Key"
-                MDListItemTertiaryText:
-                    text: "Old key will not work"
+                MDListItemSupportingText:
+                    text: "Invalidates the previous key immediately"
                 MDFabButton:
                     icon: "autorenew"
                     style: "small"
@@ -116,3 +147,4 @@ class SettingsBox(MDBoxLayout):
 
 class ApiKeyTxtbox(MDTextField):
     pass
+

@@ -1,4 +1,14 @@
-from kivy.utils import platform
+try:
+    from kivy.utils import platform
+except ImportError:
+    import sys
+    if sys.platform.startswith("win"):
+        platform = "win"
+    elif sys.platform.startswith("linux"):
+        platform = "linux"
+    else:
+        platform = "unknown"
+
 
 from os.path import join, abspath, exists, dirname
 from threading import Thread
@@ -45,37 +55,54 @@ resp_file = join(config_dir, "resp.json")
 app_api_server = PosiApiServer()
 
 ## functions
+def atomic_write_json(file_path: str, data: dict):
+    """Write data to temporary file and atomically replace to avoid corrupt reads."""
+    import os
+    tmp_path = file_path + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as tf:
+            json.dump(data, tf)
+            tf.flush()
+            os.fsync(tf.fileno())
+        os.replace(tmp_path, file_path)
+    except Exception as e:
+        print(f"Error atomic writing {file_path}: {e}")
+
 def write_resp():
-    """ Write the response json on file. """
+    """ Write the response json on file atomically. """
     global resp_template
-    with open(resp_file, "w") as rf:
-        json.dump(resp_template, rf)
+    atomic_write_json(resp_file, resp_template)
 
 def read_req_file():
-    """ Read the command file from file (Instrunctions from main app). """
+    """ Read the command file from file (Instructions from main app). """
     global req_data
     if exists(req_file):
         try:
-            with open(req_file, "r") as rf:
+            with open(req_file, "r", encoding="utf-8") as rf:
                 req_data = json.load(rf)
         except Exception as e:
-            print(f"Error while reading config from svc: {e}")
+            # Ignore transient read collisions while file is being replaced
+            pass
 
 def api_server_control(api_stat: str):
     """ Turns API server on/off """
     global api_started
     global resp_template
     global req_data
-    print(req_data)
+    port = req_data.get("port", 9292)
+    print(f"Service control: {api_stat} on port {port}")
     if api_stat == "stop":
         app_api_server.stop()
         api_started = False
         resp_template["server"] = "stopped"
+        resp_template["port"] = port
     elif api_stat == "start":
-        app_api_server.start(req_data["port"])
+        app_api_server.start(port)
         api_started = True
         resp_template["server"] = "started"
+        resp_template["port"] = port
     Thread(target=write_resp, daemon=True).start()
+
 
 def app_service_thread():
     """

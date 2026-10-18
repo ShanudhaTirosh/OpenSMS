@@ -66,7 +66,8 @@ class LogBox(MDBoxLayout):
             clean_line = line.strip()
             if clean_line:
                 text_log = text_log + f"{clean_line}\n"
-        container.text = text_log
+        container.text = text_log if text_log else "No logs yet!"
+
 
         if instance:
             if top_back_btn:
@@ -111,7 +112,7 @@ class LogBox(MDBoxLayout):
     def clear_logs(self, instance=None):
         container = self.ids.log_container
         container.text = ""
-        Thread(target=self.logger.clear_logs(), daemon=True).start()
+        Thread(target=self.logger.clear_logs, daemon=True).start()
 
     def on_log_scr_exit(self, instance=None):
         if instance:

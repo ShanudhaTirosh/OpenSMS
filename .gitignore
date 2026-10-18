@@ -1,15 +1,28 @@
 # Local ignores
 .buildozer/
+app/.buildozer/
+bin/
+app/bin/
 *.apk
+*.aab
+*.jks
+*.keystore
 *.exe
 *.mp4
 *.avi
 *.onnx
 test_codes/
 logs/
-bin/
+app/logs/
 dist/
 config/
+app/config/
+.pytest_cache/
+.env
+.venv
+venv/
+env/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
