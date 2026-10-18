@@ -90,7 +90,7 @@ def get_api_keys() -> dict:
     return api_keys
 
 # data formatting for request
-PHONE_REGEX = re.compile(r'^\+?[0-9\s\-()]{7,22}$')
+PHONE_REGEX = re.compile(r'^\+?[0-9\s\-()]{7,25}$')
 
 class SmsData(BaseModel):
     number: str
@@ -101,8 +101,9 @@ class SmsData(BaseModel):
     @classmethod
     def validate_phone_number(cls, v: str) -> str:
         clean = v.strip()
-        if not PHONE_REGEX.match(clean):
-            raise ValueError("Invalid phone number format. Must contain 7 to 22 digits.")
+        digits = re.sub(r'\D', '', clean)
+        if not PHONE_REGEX.match(clean) or not (7 <= len(digits) <= 17):
+            raise ValueError("Invalid phone number format. Must contain 7 to 17 digits.")
         return clean
 
     @field_validator('text')
@@ -175,6 +176,8 @@ class PosiApiServer:
             log_activities(f"SERVER ERROR: {self.last_error}")
             if self.controlCallback:
                 self.controlCallback("error", str(e))
+        finally:
+            self.server = None
 
     def start(self, port=None):
         if self.thread and self.thread.is_alive():
@@ -203,13 +206,17 @@ async def verify_api_key(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security)
 ) -> dict:
-    client_ip = request.client.host if request.client else "unknown"
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
     now = time.time()
 
     # Periodic cleanup of stale rate-limit entries to prevent memory leak
     if len(FAILED_AUTH_ATTEMPTS) > 200:
         cutoff = now - AUTH_LOCKOUT_WINDOW_SECONDS
-        stale = [ip for ip, timestamps in FAILED_AUTH_ATTEMPTS.items() if not timestamps or timestamps[-1] < cutoff]
+        stale = [ip for ip, timestamps in list(FAILED_AUTH_ATTEMPTS.items()) if not timestamps or timestamps[-1] < cutoff]
         for ip in stale:
             FAILED_AUTH_ATTEMPTS.pop(ip, None)
 
@@ -282,6 +289,12 @@ async def process_sms_req(
     else:
         print(f"SMS failed to: {item.number}")
         log_activities(f"SMS failed to: {item.number}")
+        if server and server.kivyCallback:
+            Thread(
+                target=server.kivyCallback,
+                kwargs={"stat": False, "count": 1},
+                daemon=True
+            ).start()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"SMS delivery to {item.number} failed on telephony service."
@@ -290,7 +303,7 @@ async def process_sms_req(
     if server and server.kivyCallback:
         Thread(
             target=server.kivyCallback,
-            kwargs={"stat": stat, "count": 1},
+            kwargs={"stat": True, "count": 1},
             daemon=True
         ).start()
 

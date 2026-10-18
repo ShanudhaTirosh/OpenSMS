@@ -13,9 +13,10 @@ except ImportError:
 # for android
 if platform == "android":
     try:
-        from jnius import autoclass
+        from jnius import autoclass, cast
     except ImportError:
         autoclass = None
+        cast = None
 
 
 import re
@@ -27,12 +28,15 @@ def sanitize_phone_number(raw_phone: str) -> str:
     Sanitize phone number to standard dialable format.
     Preserves leading '+' for international numbers and strips all formatting
     characters (spaces, hyphens, brackets, dots).
+    Returns empty string if no digits exist.
     """
     if not raw_phone:
         return ""
     stripped = raw_phone.strip()
     is_international = stripped.startswith("+")
     digits_only = re.sub(r"[^\d]", "", stripped)
+    if not digits_only:
+        return ""
     return f"+{digits_only}" if is_international else digits_only
 
 def calculate_sms_segments(text: str) -> dict:
@@ -77,13 +81,28 @@ def get_sms_manager():
     """Retrieve SmsManager instance compatible across Android versions."""
     SmsManager = autoclass('android.telephony.SmsManager')
     try:
-        PythonActivity = autoclass('org.kivy.android.PythonActivity')
         Context = autoclass('android.content.Context')
-        activity = PythonActivity.mActivity
+        context = None
+        try:
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            context = PythonActivity.mActivity
+        except Exception:
+            pass
+
+        if not context:
+            try:
+                PythonService = autoclass('org.kivy.android.PythonService')
+                context = PythonService.mService
+            except Exception:
+                pass
+
         # For Android 12+ (API 31+)
-        sms_manager = activity.getSystemService(Context.TELEPHONY_SMS_SERVICE)
-        if sms_manager is not None:
-            return sms_manager
+        if context is not None:
+            raw_manager = context.getSystemService(Context.TELEPHONY_SMS_SERVICE)
+            if raw_manager is not None:
+                if cast is not None:
+                    return cast('android.telephony.SmsManager', raw_manager)
+                return raw_manager
     except Exception as e:
         print("Notice: getSystemService for SmsManager failed, falling back to getDefault():", e)
     return SmsManager.getDefault()

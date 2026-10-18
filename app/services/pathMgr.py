@@ -84,7 +84,9 @@ def get_network_interfaces_info() -> dict:
                 addrs = net_if.getInetAddresses()
                 while addrs.hasMoreElements():
                     addr = addrs.nextElement()
-                    ip_str = str(addr.getHostAddress())
+                    ip_str = str(addr.getHostAddress()).strip()
+                    if "%" in ip_str:
+                        ip_str = ip_str.split("%")[0]
                     # Only consider IPv4
                     if ":" not in ip_str and not ip_str.startswith("127."):
                         if ip_str not in seen_ips:
@@ -168,6 +170,11 @@ def get_network_interfaces_info() -> dict:
 
     if not ordered_ips:
         ordered_ips.append("127.0.0.1")
+
+    # If local_ip is not set, fallback to the best non-tailscale IP or 127.0.0.1
+    if not info["local_ip"]:
+        non_ts_ips = [ip for ip in ordered_ips if not is_tailscale_ip(ip) and not ip.startswith("127.")]
+        info["local_ip"] = non_ts_ips[0] if non_ts_ips else "127.0.0.1"
 
     info["all_ips"] = ordered_ips
     return info

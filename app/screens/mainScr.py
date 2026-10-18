@@ -212,6 +212,6 @@ class AppHomeBox(MDBoxLayout):
 class ButtonControl(MDButton):
     btn_icon = StringProperty("play")
     btn_txt = StringProperty("Start Server")
-    btn_colour = "green"
+    btn_colour = StringProperty("green")
 
 

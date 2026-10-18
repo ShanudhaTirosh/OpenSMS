@@ -230,19 +230,19 @@ class OpenSmsApp(MDApp):
             home_scr.is_online = self.api_started
             home_scr.has_tailscale = ts_status["connected"]
 
-            if hasattr(home_scr.ids, "ts_chip_lbl"):
+            if "ts_chip_lbl" in home_scr.ids:
                 if ts_status["connected"]:
                     home_scr.ids.ts_chip_lbl.text = f"Tailscale Mesh: Connected ({ts_status['ip']})"
                 else:
                     home_scr.ids.ts_chip_lbl.text = "Tailscale: Not detected (Tap Mesh to view guide)"
 
-            if hasattr(home_scr.ids, "ip_addresses_lbl"):
+            if "ip_addresses_lbl" in home_scr.ids:
                 home_scr.ids.ip_addresses_lbl.text = f"{ip_label_text}"
 
-            if hasattr(home_scr.ids, "api_endpoint_lbl"):
+            if "api_endpoint_lbl" in home_scr.ids:
                 home_scr.ids.api_endpoint_lbl.text = f"Endpoint ({net_type}): {preferred_endpoint}"
 
-            if hasattr(self.root.ids, "tailscale_scr"):
+            if "tailscale_scr" in self.root.ids:
                 self.root.ids.tailscale_scr.update_tailscale_info(port=port)
         except Exception as e:
             print(f"Notice: address labels not ready: {e}")
@@ -299,9 +299,9 @@ class OpenSmsApp(MDApp):
                                 home.ids.api_srv_btn.btn_icon = "stop"
                                 home.ids.api_srv_btn.btn_txt = "Stop Server"
                                 home.ids.api_srv_btn.btn_colour = "orange"
-                                if hasattr(home.ids, "status_icon"):
+                                if "status_icon" in home.ids:
                                     home.ids.status_icon.icon = "check-circle"
-                                if hasattr(home.ids, "api_endpoint_lbl"):
+                                if "api_endpoint_lbl" in home.ids:
                                     home.ids.api_endpoint_lbl.text = f"Endpoint ({net_type}): {preferred_endpoint}"
                                 self.show_toast_msg("API Server Started")
                             Clock.schedule_once(update_started_ui)
@@ -318,7 +318,7 @@ class OpenSmsApp(MDApp):
                                 home.ids.api_srv_btn.btn_icon = "play"
                                 home.ids.api_srv_btn.btn_txt = "Start Server"
                                 home.ids.api_srv_btn.btn_colour = "green"
-                                if hasattr(home.ids, "status_icon"):
+                                if "status_icon" in home.ids:
                                     home.ids.status_icon.icon = "cellphone-wireless"
                                 self.show_toast_msg("API Server Stopped")
                             Clock.schedule_once(update_stopped_ui)
@@ -465,6 +465,9 @@ class OpenSmsApp(MDApp):
         self.api_key = generate_new_api_key()
         if self.api_key:
             Clipboard.copy(self.api_key)
+            if "tailscale_scr" in self.root.ids:
+                port = self.req_template.get("port", 9292)
+                self.root.ids.tailscale_scr.update_tailscale_info(port=port, api_key=self.api_key)
             custom = MDDialogContentContainer(
                 ApiKeyTxtbox(text=self.api_key)
             )
@@ -505,16 +508,15 @@ class OpenSmsApp(MDApp):
     ## Copy helpers for home screen
     def copy_endpoint_url(self, instance=None):
         port = self.req_template.get("port", 9292)
-        primary_ip = self.detected_ips[0] if self.detected_ips else "127.0.0.1"
-        url = f"http://{primary_ip}:{port}/sms/"
-        Clipboard.copy(url)
-        self.show_toast_msg(f"Copied endpoint: {url}")
+        endpoint, _ = TailscaleService.get_preferred_endpoint(port)
+        Clipboard.copy(endpoint)
+        self.show_toast_msg(f"Copied endpoint: {endpoint}")
 
     def copy_curl_example(self, instance=None):
         port = self.req_template.get("port", 9292)
-        primary_ip = self.detected_ips[0] if self.detected_ips else "127.0.0.1"
+        endpoint, _ = TailscaleService.get_preferred_endpoint(port)
         curl_cmd = (
-            f"curl -i -X POST 'http://{primary_ip}:{port}/sms/' \\\n"
+            f"curl -i -X POST '{endpoint}' \\\n"
             f"  -H 'Content-Type: application/json' \\\n"
             f"  -H 'Authorization: Bearer YOUR_API_KEY' \\\n"
             f"  -d '{{\"number\": \"+1234567890\", \"text\": \"Hello from OpenSMS!\"}}'"
@@ -525,8 +527,8 @@ class OpenSmsApp(MDApp):
     ## Settings section
     def save_settings(self, instance=None, control_txt="none"):
         port_no_inp = self.root.ids.settings_scr.ids.port_no_inp
-        if control_txt == "switch":
-            self.config_template["boot"] = not self.config_template.get("boot", False)
+        auto_start_sw = self.root.ids.settings_scr.ids.auto_start_sw
+        self.config_template["boot"] = auto_start_sw.active
 
         raw_port = port_no_inp.text.strip()
         if raw_port:
@@ -661,6 +663,9 @@ class OpenSmsApp(MDApp):
             custom_content: MDDialogContentContainer | None = None,
             buttons: MDDialogButtonContainer | None = None
         ):
+        if self.txt_dialog:
+            self.txt_dialog_closer()
+
         # BUG-06 fix: Only pass non-None widgets to MDDialog
         widgets = [
             MDDialogHeadlineText(text=title),
@@ -790,7 +795,7 @@ class OpenSmsApp(MDApp):
 
     ## Drawer action hooks
     def open_test_sms_from_drawer(self):
-        if hasattr(self.root.ids, "nav_drawer"):
+        if "nav_drawer" in self.root.ids:
             self.root.ids.nav_drawer.set_state("close")
         Clock.schedule_once(lambda dt: self.show_test_sms_dialog(), 0.2)
 
@@ -798,17 +803,17 @@ class OpenSmsApp(MDApp):
         self.goto_tailscale_screen()
 
     def open_about_from_drawer(self):
-        if hasattr(self.root.ids, "nav_drawer"):
+        if "nav_drawer" in self.root.ids:
             self.root.ids.nav_drawer.set_state("close")
         Clock.schedule_once(lambda dt: self.show_about_dialog(), 0.2)
 
     def goto_logs_screen(self, instance=None):
-        if hasattr(self.root.ids, "nav_drawer"):
+        if "nav_drawer" in self.root.ids:
             self.root.ids.nav_drawer.set_state("close")
         self.go_to_screen("Logs")
 
     def goto_tailscale_screen(self, instance=None):
-        if hasattr(self.root.ids, "nav_drawer"):
+        if "nav_drawer" in self.root.ids:
             self.root.ids.nav_drawer.set_state("close")
         self.go_to_screen("Mesh")
 
@@ -824,7 +829,7 @@ class OpenSmsApp(MDApp):
         self.root.ids.top_back_btn.opacity = 1
         self.root.ids.top_back_btn.disabled = False
         port = self.req_template.get("port", 9292)
-        if hasattr(self.root.ids, "tailscale_scr"):
+        if "tailscale_scr" in self.root.ids:
             self.root.ids.tailscale_scr.update_tailscale_info(port=port)
 
     def on_settings_entry(self, instance=None):

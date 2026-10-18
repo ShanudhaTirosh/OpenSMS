@@ -50,7 +50,7 @@ jobs:
           path: |
             ~/.buildozer
             ~/.gradle
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('app/buildozer.spec', 'app/req_android.txt') }}
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('app/buildozer.spec', 'app/req_android.txt', 'app/p4a_local_recipes/**') }}
           restore-keys: |
             ${{ runner.os }}-buildozer-
 
@@ -64,12 +64,22 @@ jobs:
         run: |
           pytest tests/ -v
 
+      - name: Prepare and patch python-for-android
+        run: |
+          mkdir -p app/.buildozer/android/platform
+          if [ ! -d "app/.buildozer/android/platform/python-for-android" ]; then
+            git clone --depth 1 -b develop https://github.com/daslearning-org/p4a-unofficial.git app/.buildozer/android/platform/python-for-android
+          fi
+          python3 app/patch_p4a.py app/.buildozer/android/platform/python-for-android
+
       - name: Build Android APK with Buildozer
         working-directory: app
         env:
           ANDROID_API_LEVEL: '24'
           ANDROID_MINAPI: '24'
         run: |
+          export ANDROID_API_LEVEL=24
+          export ANDROID_MINAPI=24
           buildozer android debug
 
       - name: Upload APK artifact

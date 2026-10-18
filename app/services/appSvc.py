@@ -53,13 +53,16 @@ resp_file = join(config_dir, "resp.json")
 
 ## global obj
 app_api_server = PosiApiServer()
+in_error_state = False
 
 def on_server_control_event(event_type: str, detail: str = ""):
     global api_started
     global resp_template
+    global in_error_state
     print(f"Server control event: {event_type} - {detail}")
     if "error" in event_type:
         api_started = False
+        in_error_state = True
         resp_template["server"] = "error"
         resp_template["error"] = detail
         write_resp()
@@ -88,14 +91,17 @@ def api_server_control(api_stat: str, port: int = 9292):
     """ Turns API server on/off """
     global api_started
     global resp_template
+    global in_error_state
     print(f"Service control: {api_stat} on port {port}")
     if api_stat == "stop":
+        in_error_state = False
         app_api_server.stop()
         api_started = False
         resp_template["server"] = "stopped"
         resp_template["port"] = port
         resp_template.pop("error", None)
     elif api_stat == "start":
+        in_error_state = False
         app_api_server.start(port)
         api_started = True
         resp_template["server"] = "started"
@@ -110,7 +116,9 @@ def app_service_thread():
     """
     global api_started
     global req_data
+    global in_error_state
     current_port = 9292
+    last_processed_cmd = None
 
     write_resp()
 
@@ -118,7 +126,17 @@ def app_service_thread():
         read_req_file()
 
         server_stat = req_data.get("server", "")
-        requested_port = int(req_data.get("port", 9292))
+        try:
+            requested_port = int(req_data.get("port", 9292))
+        except (ValueError, TypeError):
+            requested_port = 9292
+
+        current_cmd = (server_stat, requested_port)
+
+        # If in error state and command hasn't changed, do not thrash in tight retry loop
+        if in_error_state and current_cmd == last_processed_cmd:
+            time.sleep(0.5)
+            continue
 
         # Handle port change while running
         if api_started and requested_port != current_port and server_stat == "start":
@@ -127,11 +145,17 @@ def app_service_thread():
             time.sleep(0.5)
             current_port = requested_port
             api_server_control("start", current_port)
-        elif not api_started and server_stat == "start":
+            last_processed_cmd = current_cmd
+        elif not api_started and server_stat == "start" and not in_error_state:
             current_port = requested_port
             api_server_control("start", current_port)
+            last_processed_cmd = current_cmd
         elif api_started and server_stat == "stop":
             api_server_control("stop", current_port)
+            last_processed_cmd = current_cmd
+        elif not api_started and server_stat == "stop" and in_error_state:
+            in_error_state = False
+            last_processed_cmd = current_cmd
 
         time.sleep(0.2)
 

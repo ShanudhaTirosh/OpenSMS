@@ -221,3 +221,63 @@ def test_batch_sms_max_limit():
     with pytest.raises(ValueError):
         BatchSmsData(messages=[])
 
+def test_phone_number_validation_non_digits():
+    # Strings without sufficient digits must fail validation
+    with pytest.raises(ValueError):
+        SmsData(number="-------", text="Hello")
+
+    with pytest.raises(ValueError):
+        SmsData(number="+       ", text="Hello")
+
+    with pytest.raises(ValueError):
+        SmsData(number="()()()()", text="Hello")
+
+    with pytest.raises(ValueError):
+        SmsData(number="+12345", text="Hello")  # Only 5 digits
+
+def test_phone_sanitization_empty_or_non_digits():
+    from services.smsApi import sanitize_phone_number
+    assert sanitize_phone_number("+") == ""
+    assert sanitize_phone_number("+   ") == ""
+    assert sanitize_phone_number("+abc") == ""
+    assert sanitize_phone_number("---") == ""
+    assert sanitize_phone_number("+1 (555) 019-2834") == "+15550192834"
+
+def test_tailscale_endpoint_fallback_never_none(monkeypatch):
+    from services.tailscaleSvc import TailscaleService
+    import services.tailscaleSvc as ts_mod
+
+    # Mock get_network_interfaces_info to return None for local_ip and tailscale_ip
+    monkeypatch.setattr(
+        ts_mod,
+        "get_network_interfaces_info",
+        lambda: {
+            "tailscale_ip": None,
+            "local_ip": None,
+            "cellular_ip": None,
+            "all_ips": ["127.0.0.1"],
+            "interfaces": []
+        }
+    )
+    endpoint, net_type = TailscaleService.get_preferred_endpoint(9292)
+    assert endpoint == "http://127.0.0.1:9292/sms/"
+    assert "None" not in endpoint
+
+def test_rate_limiting_with_forwarded_for():
+    # Failed auth using X-Forwarded-For header
+    proxy_ip = "203.0.113.195"
+    for _ in range(10):
+        client.post(
+            "/sms/",
+            headers={"Authorization": "Bearer bad-key", "X-Forwarded-For": proxy_ip},
+            json={"number": "+1234567890", "text": "Test"}
+        )
+
+    # 11th request from this forwarded IP should be rate-limited
+    res = client.post(
+        "/sms/",
+        headers={"Authorization": "Bearer bad-key", "X-Forwarded-For": proxy_ip},
+        json={"number": "+1234567890", "text": "Test"}
+    )
+    assert res.status_code == 429
+

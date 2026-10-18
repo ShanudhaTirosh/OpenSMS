@@ -151,9 +151,22 @@ class LogBox(MDBoxLayout):
                     items=menu_items,
                     caller=instance
                 )
-            instance.on_release = self.show_top_menu
 
     def show_top_menu(self, instance=None):
+        caller = instance or getattr(self.top_menu, "caller", None)
+        if not self.top_menu and caller:
+            menu_items = [
+                {
+                    "text": menu_key,
+                    "leading_icon": self.top_menu_items[menu_key]["icon"],
+                    "on_release": lambda x=menu_key: self.top_menu_callback(x),
+                    "font_size": sp(16)
+                } for menu_key in self.top_menu_items
+            ]
+            self.top_menu = MDDropdownMenu(
+                items=menu_items,
+                caller=caller
+            )
         if self.top_menu:
             self.top_menu.open()
 

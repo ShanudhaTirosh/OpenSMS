@@ -234,7 +234,7 @@ class TailscaleBox(MDBoxLayout):
             endpoint = f"http://{status['ip']}:{port}/sms/"
             self.ts_endpoint_text = f"Remote Endpoint: {endpoint}"
         else:
-            local_ip = status.get("local_ip", "127.0.0.1")
+            local_ip = status.get("local_ip") or "127.0.0.1"
             self.ts_ip_text = f"Not detected (Local LAN: {local_ip})"
             endpoint = f"http://{local_ip}:{port}/sms/"
             self.ts_endpoint_text = f"Local Endpoint: {endpoint}"
@@ -253,7 +253,7 @@ class TailscaleBox(MDBoxLayout):
         if status["connected"] and status["ip"]:
             url = f"http://{status['ip']}:{self.port}/sms/"
         else:
-            local_ip = status.get("local_ip", "127.0.0.1")
+            local_ip = status.get("local_ip") or "127.0.0.1"
             url = f"http://{local_ip}:{self.port}/sms/"
         Clipboard.copy(url)
         if app and hasattr(app, "show_toast_msg"):
