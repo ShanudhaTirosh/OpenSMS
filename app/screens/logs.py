@@ -192,9 +192,12 @@ class LogBox(MDBoxLayout):
         container.text = "Logs cleared."
         Thread(target=self.logger.clear_logs, daemon=True).start()
 
-    def on_log_scr_exit(self, instance=None):
+    def on_log_scr_exit(self, right_dot_menu=None, top_back_btn=None):
         if self.top_menu:
             self.top_menu.dismiss()
-        if instance:
-            instance.opacity = 0
-            instance.disabled = True
+        if right_dot_menu:
+            right_dot_menu.opacity = 0
+            right_dot_menu.disabled = True
+        if top_back_btn:
+            top_back_btn.opacity = 0
+            top_back_btn.disabled = True

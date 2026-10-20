@@ -42,7 +42,7 @@ Builder.load_string('''
                 padding: dp(18)
                 spacing: dp(12)
                 theme_bg_color: "Custom"
-                md_bg_color: [0.06, 0.18, 0.36, 0.14] if app.theme_cls.theme_style == "Light" else [0.12, 0.18, 0.30, 0.8]
+                md_bg_color: [0.06, 0.18, 0.36, 0.14] if app.theme_style == "Light" else [0.12, 0.18, 0.30, 0.8]
 
                 # Status Header Row
                 MDBoxLayout:
@@ -86,27 +86,30 @@ Builder.load_string('''
                     adaptive_height: True
                     spacing: dp(6)
 
-                    # Tailscale Mesh Indicator Badge
-                    MDBoxLayout:
-                        id: ts_badge_box
-                        orientation: 'horizontal'
+                    # Tailscale Mesh Indicator Badge (Tap to view Mesh setup)
+                    MDButton:
+                        id: ts_badge_btn
+                        style: "tonal"
+                        theme_bg_color: "Custom"
+                        md_bg_color: [0.1, 0.7, 0.3, 0.15] if root.has_tailscale else ([0.8, 0.2, 0.2, 0.1] if app.theme_style == "Light" else [0.35, 0.15, 0.15, 0.6])
+                        on_release: app.goto_tailscale_screen()
                         adaptive_height: True
-                        spacing: dp(6)
+                        size_hint_x: 1
 
                         MDButtonIcon:
                             id: ts_chip_icon
-                            icon: "shield-check"
+                            icon: "shield-check" if root.has_tailscale else "shield-off"
                             theme_icon_color: "Custom"
-                            icon_color: [0.1, 0.75, 0.35, 1] if root.has_tailscale else [0.7, 0.7, 0.7, 1]
+                            icon_color: [0.1, 0.75, 0.35, 1] if root.has_tailscale else [0.85, 0.3, 0.3, 1]
                             pos_hint: {"center_y": 0.5}
 
-                        MDLabel:
+                        MDButtonText:
                             id: ts_chip_lbl
-                            text: "Tailscale Mesh: Connected" if root.has_tailscale else "Tailscale: Not detected (Tap Mesh to setup)"
+                            text: "Tailscale Mesh: Connected" if root.has_tailscale else "Tailscale: Not detected (Tap to setup)"
                             font_style: "Label"
                             role: "medium"
-                            theme_text_color: "Primary"
-                            adaptive_height: True
+                            theme_text_color: "Custom"
+                            text_color: [0.1, 0.6, 0.25, 1] if root.has_tailscale else ([0.75, 0.2, 0.2, 1] if app.theme_style == "Light" else [0.95, 0.5, 0.5, 1])
                             pos_hint: {"center_y": 0.5}
 
                     MDLabel:
@@ -170,7 +173,7 @@ Builder.load_string('''
                 padding: dp(14)
                 spacing: dp(10)
                 theme_bg_color: "Custom"
-                md_bg_color: [0.08, 0.16, 0.32, 0.08] if app.theme_cls.theme_style == "Light" else [0.12, 0.18, 0.28, 0.5]
+                md_bg_color: [0.08, 0.16, 0.32, 0.08] if app.theme_style == "Light" else [0.12, 0.18, 0.28, 0.5]
 
                 MDLabel:
                     text: "Quick Operations"

@@ -74,7 +74,7 @@ Builder.load_string('''
                     icon_inactive: "close"
                     icon_active_color: "green"
                     track_color_active: "green"
-                    on_release: app.save_settings(self, "switch")
+                    on_active: app.toggle_auto_start(self, self.active)
 
             # Port Number
             MDListItem:
@@ -107,7 +107,7 @@ Builder.load_string('''
                     icon_inactive: "close"
                     icon_active_color: "green"
                     track_color_active: "green"
-                    on_release: app.toggle_wakelock_setting(self)
+                    on_active: app.toggle_wakelock_setting(self, self.active)
 
             # Dark Mode
             MDListItem:
@@ -122,7 +122,7 @@ Builder.load_string('''
                     pos_hint: {"center_y": 0.5}
                     icon_active: "check"
                     icon_inactive: "close"
-                    on_release: app.toggle_theme(self)
+                    on_active: app.toggle_theme(self, self.active)
 
             # API Key Management
             MDListItem:

@@ -281,3 +281,83 @@ def test_rate_limiting_with_forwarded_for():
     )
     assert res.status_code == 429
 
+def test_tailscale_direct_ip_connection():
+    from services.tailscaleSvc import TailscaleService
+    TailscaleService.disconnect_key()
+    res = TailscaleService.connect_tailscale_key("100.88.99.100")
+    assert res["success"] is True
+    assert res["ip"] == "100.88.99.100"
+
+    status = TailscaleService.get_status()
+    assert status["connected"] is True
+    assert status["ip"] == "100.88.99.100"
+
+    endpoint, net_type = TailscaleService.get_preferred_endpoint(9292)
+    assert endpoint == "http://100.88.99.100:9292/sms/"
+    assert net_type == "Tailscale Mesh"
+
+    # Cleanup
+    TailscaleService.disconnect_key()
+
+def test_tailscale_invalid_inputs():
+    from services.tailscaleSvc import TailscaleService
+    TailscaleService.disconnect_key()
+
+    res_empty = TailscaleService.connect_tailscale_key("")
+    assert res_empty["success"] is False
+
+    res_invalid = TailscaleService.connect_tailscale_key("not-a-valid-key-or-ip")
+    assert res_invalid["success"] is False
+    assert "Unrecognized" in res_invalid["error"]
+
+def test_tailscale_api_token_connection(monkeypatch):
+    from services.tailscaleSvc import TailscaleService
+    TailscaleService.disconnect_key()
+
+    class MockResponse:
+        status_code = 200
+        def json(self):
+            return {
+                "devices": [
+                    {
+                        "id": "1",
+                        "name": "my-pc.tailnet.ts.net",
+                        "hostname": "my-pc",
+                        "addresses": ["100.64.1.2"],
+                        "os": "windows",
+                        "online": True
+                    },
+                    {
+                        "id": "2",
+                        "name": "pixel-phone.tailnet.ts.net",
+                        "hostname": "pixel-phone",
+                        "addresses": ["100.105.20.30"],
+                        "os": "android",
+                        "online": True
+                    }
+                ]
+            }
+
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockResponse())
+
+    res = TailscaleService.connect_tailscale_key("tskey-api-test-token-12345678901234567890")
+    assert res["success"] is True
+    # Should pick android device
+    assert res["ip"] == "100.105.20.30"
+    assert "pixel-phone" in res["node_name"]
+
+    conf = TailscaleService.get_config_dict()
+    assert conf["connected"] is True
+    assert conf["ip"] == "100.105.20.30"
+
+    # Test restoring configuration
+    TailscaleService.disconnect_key()
+    assert TailscaleService.get_status()["connected"] is False
+
+    TailscaleService.init_config({"tailscale": conf})
+    assert TailscaleService.get_status()["connected"] is True
+    assert TailscaleService.get_status()["ip"] == "100.105.20.30"
+
+    TailscaleService.disconnect_key()
+

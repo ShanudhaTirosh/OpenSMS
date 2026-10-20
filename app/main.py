@@ -96,6 +96,8 @@ kv_file_path = os.path.join(base_path, 'main_layout.kv')
 
 ## Main App Class
 class OpenSmsApp(MDApp):
+    theme_style = StringProperty("Light")
+    screen_title = StringProperty("OpenSMS • Gateway")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -112,7 +114,8 @@ class OpenSmsApp(MDApp):
             "port": 9292,
             "boot": False,
             "wakelock": True,
-            "theme": "Light"
+            "theme": "Light",
+            "tailscale": {}
         }
         self.req_template = {
             "port": 9292,
@@ -122,8 +125,14 @@ class OpenSmsApp(MDApp):
     def build(self):
         self.theme_cls.primary_palette = "Blue"
         self.theme_cls.accent_palette = "Orange"
-        self.theme_cls.theme_style = self.config_template.get("theme", "Light")
+        theme = self.config_template.get("theme", "Light")
+        self.theme_style = theme
+        self.theme_cls.theme_style = theme
         return Builder.load_file(kv_file_path)
+
+    def on_theme_style(self, instance, value):
+        if self.theme_cls.theme_style != value:
+            self.theme_cls.theme_style = value
 
     ## App logics
     def on_start(self):
@@ -189,6 +198,8 @@ class OpenSmsApp(MDApp):
                 self.config_template["boot"] = bool(saved_config.get("boot", False))
                 self.config_template["wakelock"] = bool(saved_config.get("wakelock", True))
                 self.config_template["theme"] = saved_config.get("theme", "Light")
+                if "tailscale" in saved_config and isinstance(saved_config["tailscale"], dict):
+                    self.config_template["tailscale"] = saved_config["tailscale"]
             except Exception as e:
                 print(f"Config load error: {e}")
 
@@ -205,7 +216,11 @@ class OpenSmsApp(MDApp):
         port_no_inp.text = str(self.config_template["port"])
         wakelock_sw.active = self.config_template.get("wakelock", True)
         dark_theme_sw.active = (self.config_template.get("theme") == "Dark")
-        self.theme_cls.theme_style = self.config_template.get("theme", "Light")
+        self.theme_style = self.config_template.get("theme", "Light")
+        self.theme_cls.theme_style = self.theme_style
+
+        # Initialize Tailscale service with saved config
+        TailscaleService.init_config(self.config_template)
 
         api_keys = get_api_keys()
         if len(api_keys) >= 1:
@@ -221,9 +236,10 @@ class OpenSmsApp(MDApp):
         """Find local Wi-Fi, Ethernet, and VPN IP addresses, prioritizing Tailscale."""
         self.detected_ips = get_device_ip_addresses()
         port = self.req_template.get("port", 9292)
-        ip_label_text = ", ".join(self.detected_ips)
         ts_status = TailscaleService.get_status()
         preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port)
+        all_ips = ts_status.get("all_ips") or self.detected_ips
+        ip_label_text = ", ".join(all_ips)
 
         try:
             home_scr = self.root.ids.home_scr
@@ -234,7 +250,7 @@ class OpenSmsApp(MDApp):
                 if ts_status["connected"]:
                     home_scr.ids.ts_chip_lbl.text = f"Tailscale Mesh: Connected ({ts_status['ip']})"
                 else:
-                    home_scr.ids.ts_chip_lbl.text = "Tailscale: Not detected (Tap Mesh to view guide)"
+                    home_scr.ids.ts_chip_lbl.text = "Tailscale: Not connected (Tap to connect)"
 
             if "ip_addresses_lbl" in home_scr.ids:
                 home_scr.ids.ip_addresses_lbl.text = f"{ip_label_text}"
@@ -551,19 +567,35 @@ class OpenSmsApp(MDApp):
         self.update_network_addresses()
         Clock.schedule_once(lambda dt: self.show_toast_msg("Settings saved successfully."))
 
-    def toggle_theme(self, switch_instance):
-        new_style = "Dark" if switch_instance.active else "Light"
+    def toggle_theme(self, switch_instance, is_active=None):
+        if is_active is None:
+            is_active = switch_instance.active
+        new_style = "Dark" if is_active else "Light"
+        if self.theme_style == new_style and self.theme_cls.theme_style == new_style:
+            return
+        self.theme_style = new_style
         self.theme_cls.theme_style = new_style
         self.config_template["theme"] = new_style
         Thread(target=self.write_app_conf, daemon=True).start()
 
-    def toggle_wakelock_setting(self, switch_instance):
-        enabled = switch_instance.active
-        self.config_template["wakelock"] = enabled
-        if enabled and self.api_started:
+    def toggle_wakelock_setting(self, switch_instance, is_active=None):
+        if is_active is None:
+            is_active = switch_instance.active
+        if self.config_template.get("wakelock") == is_active:
+            return
+        self.config_template["wakelock"] = is_active
+        if is_active and self.api_started:
             self.acquire_wakelock()
-        elif not enabled:
+        elif not is_active:
             self.release_wakelock()
+        Thread(target=self.write_app_conf, daemon=True).start()
+
+    def toggle_auto_start(self, switch_instance, is_active=None):
+        if is_active is None:
+            is_active = switch_instance.active
+        if self.config_template.get("boot") == is_active:
+            return
+        self.config_template["boot"] = is_active
         Thread(target=self.write_app_conf, daemon=True).start()
 
     def refresh_settings_view(self):
@@ -602,8 +634,10 @@ class OpenSmsApp(MDApp):
             "port": 9292,
             "boot": False,
             "wakelock": True,
-            "theme": "Light"
+            "theme": "Light",
+            "tailscale": {}
         }
+        TailscaleService.disconnect_key()
         self.req_template["port"] = 9292
         self.theme_cls.theme_style = "Light"
         self.refresh_settings_view()
@@ -793,39 +827,194 @@ class OpenSmsApp(MDApp):
             buttons
         )
 
+    ## Navigation Drawer helpers
+    def toggle_nav_drawer(self):
+        try:
+            if hasattr(self.root, 'ids') and 'nav_drawer' in self.root.ids:
+                self.root.ids.nav_drawer.set_state("toggle")
+        except Exception as e:
+            print(f"Error toggling nav drawer: {e}")
+
+    def close_nav_drawer(self):
+        try:
+            if hasattr(self.root, 'ids') and 'nav_drawer' in self.root.ids:
+                self.root.ids.nav_drawer.set_state("close")
+        except Exception:
+            pass
+
+    ## Tailscale in-app config persistence
+    def save_tailscale_config(self, key: str, ip: str = None, node_name: str = None, mode: str = "configured"):
+        if "tailscale" not in self.config_template:
+            self.config_template["tailscale"] = {}
+        self.config_template["tailscale"] = {
+            "key": key,
+            "ip": ip,
+            "node_name": node_name,
+            "mode": mode,
+            "connected": bool(ip)
+        }
+        Thread(target=self.write_app_conf, daemon=True).start()
+        self.update_network_addresses()
+
+    def clear_tailscale_config(self):
+        self.config_template["tailscale"] = {
+            "key": "",
+            "ip": None,
+            "node_name": None,
+            "mode": None,
+            "connected": False
+        }
+        Thread(target=self.write_app_conf, daemon=True).start()
+        self.update_network_addresses()
+
+    def copy_endpoint_url_from_drawer(self):
+        self.close_nav_drawer()
+        self.copy_endpoint_url()
+
+    def toggle_theme_from_drawer(self):
+        self.close_nav_drawer()
+        new_active = (self.theme_style != "Dark")
+        try:
+            if hasattr(self.root, 'ids') and 'settings_scr' in self.root.ids:
+                sw = self.root.ids.settings_scr.ids.dark_theme_sw
+                sw.active = new_active
+            else:
+                self.toggle_theme(None, new_active)
+        except Exception:
+            self.toggle_theme(None, new_active)
+
+    def show_key_help_dialog(self, instance=None):
+        help_text = (
+            "How to connect OpenSMS to Tailscale:\n\n"
+            "1. API Access Token (Recommended):\n"
+            "   • Visit https://login.tailscale.com/admin/settings/keys\n"
+            "   • Generate an API Access Token (tskey-api-...)\n"
+            "   • Paste it here and tap 'Connect & Get IP'\n"
+            "   • OpenSMS queries your Tailnet and binds the device IP!\n\n"
+            "2. Direct 100.x.y.z IP:\n"
+            "   • If your device is already running Tailscale, enter its 100.x.y.z IP address directly.\n\n"
+            "3. Native Tailscale Android App:\n"
+            "   • Simply install Tailscale from the Play Store and log in.\n"
+            "   • OpenSMS detects the live VPN tunnel automatically!"
+        )
+        buttons = MDDialogButtonContainer(
+            Widget(),
+            MDButton(
+                MDButtonText(text="Close"),
+                style="text",
+                on_release=self.txt_dialog_closer
+            ),
+            MDButton(
+                MDButtonText(text="Open Tailscale Keys", theme_text_color="Custom", text_color="blue"),
+                style="text",
+                on_release=lambda x: self.open_tailscale_keys_web()
+            ),
+            spacing="8dp",
+        )
+        self.show_text_dialog(
+            "Tailscale Setup Guide",
+            help_text,
+            None,
+            buttons
+        )
+
+    def open_tailscale_keys_web(self, instance=None):
+        self.txt_dialog_closer()
+        url = "https://login.tailscale.com/admin/settings/keys"
+        if platform == "android":
+            try:
+                Intent = autoclass('android.content.Intent')
+                Uri = autoclass('android.net.Uri')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                currentActivity = PythonActivity.mActivity
+                intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                currentActivity.startActivity(intent)
+                return
+            except Exception as e:
+                print(f"Error opening browser: {e}")
+        import webbrowser
+        webbrowser.open(url)
+
     ## Drawer action hooks
     def open_test_sms_from_drawer(self):
-        if "nav_drawer" in self.root.ids:
-            self.root.ids.nav_drawer.set_state("close")
+        self.close_nav_drawer()
         Clock.schedule_once(lambda dt: self.show_test_sms_dialog(), 0.2)
 
     def open_vpn_guide_from_drawer(self):
         self.goto_tailscale_screen()
 
     def open_about_from_drawer(self):
-        if "nav_drawer" in self.root.ids:
-            self.root.ids.nav_drawer.set_state("close")
+        self.close_nav_drawer()
         Clock.schedule_once(lambda dt: self.show_about_dialog(), 0.2)
 
     def goto_logs_screen(self, instance=None):
-        if "nav_drawer" in self.root.ids:
-            self.root.ids.nav_drawer.set_state("close")
+        self.close_nav_drawer()
         self.go_to_screen("Logs")
 
     def goto_tailscale_screen(self, instance=None):
-        if "nav_drawer" in self.root.ids:
-            self.root.ids.nav_drawer.set_state("close")
+        self.close_nav_drawer()
         self.go_to_screen("Mesh")
 
+    def open_or_install_tailscale(self, instance=None):
+        """Open Tailscale app if installed, or open Google Play Store / download page."""
+        if platform == "android":
+            try:
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                currentActivity = PythonActivity.mActivity
+                packageManager = currentActivity.getPackageManager()
+                launchIntent = packageManager.getLaunchIntentForPackage("com.tailscale.ipn")
+                if launchIntent:
+                    currentActivity.startActivity(launchIntent)
+                    self.show_toast_msg("Opening Tailscale...")
+                    return
+            except Exception as e:
+                print(f"Tailscale launch notice: {e}")
+
+            # Fallback to Play Store on Android
+            try:
+                Intent = autoclass('android.content.Intent')
+                Uri = autoclass('android.net.Uri')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                currentActivity = PythonActivity.mActivity
+                marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.tailscale.ipn"))
+                currentActivity.startActivity(marketIntent)
+                self.show_toast_msg("Opening Play Store for Tailscale...")
+                return
+            except Exception:
+                try:
+                    Intent = autoclass('android.content.Intent')
+                    Uri = autoclass('android.net.Uri')
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    currentActivity = PythonActivity.mActivity
+                    webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://tailscale.com/download/android"))
+                    currentActivity.startActivity(webIntent)
+                    return
+                except Exception as ex:
+                    print(f"Error opening Tailscale url: {ex}")
+        else:
+            import webbrowser
+            webbrowser.open("https://tailscale.com/download")
+            self.show_toast_msg("Opening Tailscale download page...")
+
     def go_to_screen(self, screen: str):
+        self.close_nav_drawer()
         self.root.ids.screen_manager.current = screen
+        try:
+            bar = self.root.ids.btm_nav_bar
+            for child in bar.children:
+                if hasattr(child, "text"):
+                    child.active = (child.text == screen)
+        except Exception:
+            pass
 
     def on_main_screen_entry(self, instance=None):
+        self.screen_title = "OpenSMS • Gateway"
         self.root.ids.top_back_btn.opacity = 0
         self.root.ids.top_back_btn.disabled = True
         self.update_network_addresses()
 
     def on_tailscale_screen_entry(self, instance=None):
+        self.screen_title = "OpenSMS • Remote Mesh"
         self.root.ids.top_back_btn.opacity = 1
         self.root.ids.top_back_btn.disabled = False
         port = self.req_template.get("port", 9292)
@@ -833,8 +1022,18 @@ class OpenSmsApp(MDApp):
             self.root.ids.tailscale_scr.update_tailscale_info(port=port)
 
     def on_settings_entry(self, instance=None):
+        self.screen_title = "OpenSMS • Settings"
         self.root.ids.top_back_btn.opacity = 1
         self.root.ids.top_back_btn.disabled = False
+        self.refresh_settings_view()
+
+    def on_logs_screen_entry(self, right_dot_menu=None, top_back_btn=None):
+        self.screen_title = "OpenSMS • API Logs"
+        if top_back_btn:
+            top_back_btn.opacity = 1
+            top_back_btn.disabled = False
+        if "log_scr" in self.root.ids:
+            self.root.ids.log_scr.log_show(right_dot_menu, top_back_btn)
 
     def back_button_action(self, instance=None):
         if self.root.ids.screen_manager.current in ["Settings", "Logs", "Mesh"]:
@@ -864,7 +1063,7 @@ class OpenSmsApp(MDApp):
             item_icon: str,
             item_text: str,
         ):
-        self.root.ids.screen_manager.current = item_text
+        self.go_to_screen(item_text)
 
 if __name__ == '__main__':
     OpenSmsApp().run()

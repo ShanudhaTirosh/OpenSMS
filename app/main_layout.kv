@@ -21,14 +21,14 @@ MDScreen:
         MDTopAppBar:
             type: "small"
             theme_bg_color: "Custom"
-            md_bg_color: [0.06, 0.16, 0.32, 1] if app.theme_cls.theme_style == "Light" else [0.08, 0.12, 0.20, 1]
+            md_bg_color: [0.06, 0.16, 0.32, 1] if app.theme_style == "Light" else [0.08, 0.12, 0.20, 1]
             pos_hint: {"top": 1}
 
             MDTopAppBarLeadingButtonContainer:
                 MDActionTopAppBarButton:
                     icon: "menu"
                     color: "white"
-                    on_release: nav_drawer.set_state("toggle")
+                    on_release: app.toggle_nav_drawer()
                 MDActionTopAppBarButton:
                     id: top_back_btn
                     icon: "arrow-left"
@@ -37,7 +37,7 @@ MDScreen:
                     disabled: True
                     on_release: app.back_button_action()
             MDTopAppBarTitle:
-                text: "OpenSMS"
+                text: app.screen_title
                 color: "white"
             MDTopAppBarTrailingButtonContainer:
                 MDActionTopAppBarButton:
@@ -78,8 +78,8 @@ MDScreen:
 
                     MDScreen:
                         name: "Logs"
-                        on_enter: log_scr.log_show(right_dot_menu, top_back_btn)
-                        on_leave: log_scr.on_log_scr_exit(right_dot_menu)
+                        on_enter: app.on_logs_screen_entry(right_dot_menu, top_back_btn)
+                        on_leave: log_scr.on_log_scr_exit(right_dot_menu, top_back_btn)
                         LogBox:
                             id: log_scr
                             padding: 8, 2, 8, (main_scr_box.bottom_pad + btm_nav_bar.height + 2)
@@ -90,10 +90,10 @@ MDScreen:
 
                     MDNavigationDrawerMenu:
                         MDNavigationDrawerLabel:
-                            text: "Navigation & Tools"
+                            text: "OpenSMS Gateway"
 
                         MDNavigationDrawerItem:
-                            on_release: app.go_to_screen("SMS"); nav_drawer.set_state("close")
+                            on_release: app.go_to_screen("SMS")
                             MDNavigationDrawerItemLeadingIcon:
                                 icon: "cellphone-wireless"
                             MDNavigationDrawerItemText:
@@ -102,9 +102,28 @@ MDScreen:
                         MDNavigationDrawerItem:
                             on_release: app.goto_tailscale_screen()
                             MDNavigationDrawerItemLeadingIcon:
-                                icon: "vpn"
+                                icon: "shield-account-outline"
                             MDNavigationDrawerItemText:
                                 text: "Remote Mesh (Tailscale)"
+
+                        MDNavigationDrawerItem:
+                            on_release: app.goto_logs_screen()
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "format-list-bulleted"
+                            MDNavigationDrawerItemText:
+                                text: "API Traffic Logs"
+
+                        MDNavigationDrawerItem:
+                            on_release: app.go_to_screen("Settings")
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "cog-outline"
+                            MDNavigationDrawerItemText:
+                                text: "Settings & Power"
+
+                        MDNavigationDrawerDivider:
+
+                        MDNavigationDrawerLabel:
+                            text: "Tools & Actions"
 
                         MDNavigationDrawerItem:
                             on_release: app.open_test_sms_from_drawer()
@@ -114,18 +133,23 @@ MDScreen:
                                 text: "Send Test SMS"
 
                         MDNavigationDrawerItem:
-                            on_release: app.goto_logs_screen()
+                            on_release: app.copy_endpoint_url_from_drawer()
                             MDNavigationDrawerItemLeadingIcon:
-                                icon: "text-box-search"
+                                icon: "content-copy"
                             MDNavigationDrawerItemText:
-                                text: "API Logs"
+                                text: "Copy Gateway URL"
 
-                        MDNavigationDrawerDivider:
+                        MDNavigationDrawerItem:
+                            on_release: app.toggle_theme_from_drawer()
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "theme-light-dark"
+                            MDNavigationDrawerItemText:
+                                text: "Toggle Dark Theme"
 
                         MDNavigationDrawerItem:
                             on_release: app.open_about_from_drawer()
                             MDNavigationDrawerItemLeadingIcon:
-                                icon: "information"
+                                icon: "information-outline"
                             MDNavigationDrawerItemText:
                                 text: "About OpenSMS"
 
@@ -140,11 +164,9 @@ MDScreen:
                     active: True
 
                 BaseMDNavigationItem
-                    icon: "vpn"
+                    icon: "shield-account-outline"
                     text: "Mesh"
 
                 BaseMDNavigationItem
-                    icon: "cog"
+                    icon: "cog-outline"
                     text: "Settings"
-
-
