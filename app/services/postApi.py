@@ -10,6 +10,7 @@ import json
 import uuid
 
 from fastapi import FastAPI, Request, HTTPException, Depends, status, Query
+from fastapi.responses import PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, field_validator
 import uvicorn
@@ -462,7 +463,41 @@ async def get_system_sims(client: dict = Depends(verify_api_key)):
 
 @app.get("/system/update/")
 async def check_app_update(client: dict = Depends(verify_api_key)):
-    return UpdateManager.check_for_updates("0.3.0")
+    return UpdateManager.check_for_updates("0.4.0")
+
+@app.get("/llms.txt", response_class=PlainTextResponse)
+async def get_llms_txt():
+    """Serve standard llms.txt directly to AI agents / LLMs."""
+    possible_paths = [
+        join(dirname(dirname(dirname(abspath(__file__)))), "llms.txt"),
+        join(dirname(dirname(dirname(abspath(__file__)))), "docs", "llms.txt"),
+        join(config_dir, "llms.txt")
+    ]
+    for p in possible_paths:
+        if exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                pass
+    return "# OpenSMS API for LLMs & AI Agents\n\nBase URL: http://<DEVICE_IP>:9292\nAuth: Bearer <API_KEY>\nEndpoints: POST /sms/, POST /sms/batch/, GET /sms/{id}, GET /system/stats/"
+
+@app.get("/docs/markdown", response_class=PlainTextResponse)
+@app.get("/docs/ai", response_class=PlainTextResponse)
+async def get_markdown_docs():
+    """Serve full Markdown API docs directly over HTTP for LLMs and developers."""
+    possible_paths = [
+        join(dirname(dirname(dirname(abspath(__file__)))), "docs", "api-reference.md"),
+        join(config_dir, "api-reference.md")
+    ]
+    for p in possible_paths:
+        if exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                pass
+    return "# OpenSMS API Reference\n\nEndpoints:\n- POST /sms/\n- POST /sms/batch/\n- GET /sms/{id}\n- GET /system/stats/"
 
 @app.post("/control/")
 async def internal_control(

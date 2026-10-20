@@ -1,0 +1,584 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenSMS REST API",
+    "version": "0.4.0",
+    "description": "High-performance, privacy-first Android SMS Gateway REST API with SQLite WAL persistence, Dual-SIM routing, and Tailscale Mesh cross-network connectivity.",
+    "contact": {
+      "name": "Shanudha Tirosh",
+      "url": "https://info.shanutechx.com",
+      "email": "info@shanutechx.com"
+    },
+    "license": {
+      "name": "Apache 2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://{device_ip}:{port}",
+      "description": "Active Android OpenSMS Gateway",
+      "variables": {
+        "device_ip": {
+          "default": "127.0.0.1",
+          "description": "IP address of the Android phone (Wi-Fi, Tailscale 100.x.y.z, or Localhost)"
+        },
+        "port": {
+          "default": "9292",
+          "description": "Configured gateway port (default: 9292)"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "paths": {
+    "/health/": {
+      "get": {
+        "summary": "Gateway Health Check",
+        "description": "Liveness check that does not require authentication. Returns status 200 OK when gateway is responsive.",
+        "operationId": "healthCheck",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Gateway is online and operational",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sms/": {
+      "post": {
+        "summary": "Send Single SMS",
+        "description": "Dispatches an SMS to a single recipient phone number with automatic phone sanitization and optional dual-SIM slot selection.",
+        "operationId": "sendSms",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SMS successfully dispatched to cellular baseband",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid phone number or empty message payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (too many failed authentication attempts)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Cellular carrier error or SMS transmission failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sms/batch/": {
+      "post": {
+        "summary": "Send Batch SMS (Up to 100 Recipients)",
+        "description": "Dispatches multiple SMS messages sequentially with automatic 100ms rate pacing to prevent cellular modem saturation.",
+        "operationId": "sendBatchSms",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchSmsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch operation completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchSmsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid batch payload or exceeds 100 items limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sms/{id}": {
+      "get": {
+        "summary": "Get SMS Status by ID",
+        "description": "Retrieves the persistent delivery status, timestamp, segment info, and carrier error (if any) from SQLite.",
+        "operationId": "getSmsById",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The unique message ID generated at dispatch",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message status retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message ID not found"
+          }
+        }
+      }
+    },
+    "/sms/history/": {
+      "get": {
+        "summary": "List SMS History",
+        "description": "Retrieves paginated SMS history from SQLite database with optional status filter.",
+        "operationId": "listSmsHistory",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Number of records to return (1-200, default 50)",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Number of records to skip for pagination",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by delivery status: all, sent, failed, or queued",
+            "schema": {
+              "type": "string",
+              "enum": ["all", "sent", "failed", "queued"],
+              "default": "all"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Search keyword matching recipient number or text snippet",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Historical message list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/stats/": {
+      "get": {
+        "summary": "Gateway Metrics & Telemetry",
+        "description": "Retrieves real-time gateway metrics including total sent today, success rate percentage, queue depth, and app version.",
+        "operationId": "getSystemStats",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Telemetry metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/sims/": {
+      "get": {
+        "summary": "List Active SIM Slots",
+        "description": "Detects and returns active SIM cards and carrier subscription info via Android SubscriptionManager.",
+        "operationId": "getSystemSims",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active SIM list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/update/": {
+      "get": {
+        "summary": "Check for GitHub Updates",
+        "description": "Queries GitHub Releases API to check if a newer OpenSMS APK is available.",
+        "operationId": "checkUpdate",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Update status and metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API Key",
+        "description": "OpenSMS secret API key. Pass in Header: `Authorization: Bearer osms_...`"
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "service": {
+            "type": "string",
+            "example": "OpenSMS"
+          },
+          "version": {
+            "type": "string",
+            "example": "0.4.0"
+          }
+        }
+      },
+      "SmsRequest": {
+        "type": "object",
+        "required": ["number", "text"],
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "Recipient phone number with country code (e.g., +1234567890 or 0771234567)",
+            "example": "+1234567890"
+          },
+          "text": {
+            "type": "string",
+            "description": "SMS message body. Standard GSM-7 or Unicode UCS-2 supported.",
+            "example": "Verification code: 849201. Expires in 5 minutes."
+          },
+          "sim_slot": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Optional cellular SIM slot index (0 for SIM 1, 1 for SIM 2). Default is system preferred slot.",
+            "example": 0
+          }
+        }
+      },
+      "SmsResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "msg_d83e29f10a7b45"
+          },
+          "number": {
+            "type": "string",
+            "example": "+1234567890"
+          },
+          "stat": {
+            "type": "boolean",
+            "example": true
+          },
+          "sim_slot": {
+            "type": "integer",
+            "example": 0
+          },
+          "segments": {
+            "type": "integer",
+            "example": 1
+          },
+          "encoding": {
+            "type": "string",
+            "example": "GSM-7"
+          }
+        }
+      },
+      "BatchSmsRequest": {
+        "type": "object",
+        "required": ["messages"],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/SmsRequest"
+            }
+          },
+          "sim_slot": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Global fallback SIM slot for batch if not specified on items."
+          }
+        }
+      },
+      "BatchSmsResponse": {
+        "type": "object",
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "example": "batch_98fbc102"
+          },
+          "total": {
+            "type": "integer",
+            "example": 2
+          },
+          "successful": {
+            "type": "integer",
+            "example": 2
+          },
+          "failed": {
+            "type": "integer",
+            "example": 0
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "number": { "type": "string" },
+                "stat": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "MessageRecord": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "msg_d83e29f10a7b45" },
+          "recipient": { "type": "string", "example": "+1234567890" },
+          "text": { "type": "string", "example": "Hello" },
+          "encoding": { "type": "string", "example": "GSM-7" },
+          "segments": { "type": "integer", "example": 1 },
+          "sim_slot": { "type": "integer", "example": 0 },
+          "status": { "type": "string", "enum": ["queued", "sending", "sent", "failed"], "example": "sent" },
+          "created_at": { "type": "number", "example": 1729432800.12 },
+          "delivered_at": { "type": "number", "nullable": true, "example": 1729432801.45 },
+          "carrier_error": { "type": "string", "nullable": true, "example": null }
+        }
+      },
+      "HistoryResponse": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer", "example": 25 },
+          "offset": { "type": "integer", "example": 0 },
+          "limit": { "type": "integer", "example": 50 },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageRecord"
+            }
+          }
+        }
+      },
+      "StatsResponse": {
+        "type": "object",
+        "properties": {
+          "app": { "type": "string", "example": "OpenSMS" },
+          "version": { "type": "string", "example": "0.4.0" },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "sent_today": { "type": "integer", "example": 142 },
+              "failed_today": { "type": "integer", "example": 1 },
+              "success_rate": { "type": "number", "example": 99.3 },
+              "queue_depth": { "type": "integer", "example": 0 }
+            }
+          }
+        }
+      },
+      "SimsResponse": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer", "example": 2 },
+          "sims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "slot": { "type": "integer", "example": 0 },
+                "carrier": { "type": "string", "example": "T-Mobile" },
+                "country": { "type": "string", "example": "us" },
+                "active": { "type": "boolean", "example": true }
+              }
+            }
+          }
+        }
+      },
+      "UpdateCheckResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "has_update": { "type": "boolean", "example": false },
+          "current_version": { "type": "string", "example": "0.4.0" },
+          "latest_version": { "type": "string", "example": "0.4.0" },
+          "tag_name": { "type": "string", "example": "v0.4.0" },
+          "release_name": { "type": "string", "example": "OpenSMS v0.4.0" },
+          "release_notes": { "type": "string", "example": "Changelog details..." },
+          "html_url": { "type": "string", "example": "https://github.com/ShanudhaTirosh/OpenSMS/releases/tag/v0.4.0" },
+          "apk_url": { "type": "string", "example": "https://github.com/.../OpenSMS.apk" },
+          "apk_size": { "type": "integer", "example": 18452100 }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "example": "Invalid phone number format. Must contain 7 to 15 digits."
+          }
+        }
+      }
+    }
+  }
+}

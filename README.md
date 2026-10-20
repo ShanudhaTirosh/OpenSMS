@@ -25,6 +25,21 @@ Developed & maintained by **[Shanudha Tirosh](https://info.shanutechx.com)**.
 
 ---
 
+### 📖 Documentation & AI Integration
+
+OpenSMS provides full interactive web documentation as well as dedicated machine-readable endpoints for AI agents and LLMs:
+
+| Resource | Description | Format |
+|---|---|---|
+| **[Interactive Docs Site](docs/)** | Hosted documentation portal with live cURL generator, SDK examples, and architecture guide. | Web / HTML |
+| **[`llms.txt`](llms.txt)** | Standard discovery index for AI coding assistants (Cursor, Windsurf, Claude, ChatGPT). | Plaintext Markdown |
+| **[`llms-full.txt`](llms-full.txt)** | Full consolidated API reference and prompt context bundle for LLM context windows. | Plaintext Markdown |
+| **[API Reference](docs/api-reference.md)** | Direct machine-readable Markdown specification of all REST endpoints and error codes. | Markdown |
+| **[AI Agent Guide](docs/ai-integration.md)** | Tool schemas for OpenAI Function Calling, Anthropic Claude Tools, LangChain, and FastMCP. | Markdown |
+| **[OpenAPI 3.1](docs/openapi.json)** | Machine-readable API specification for automated tool generators and Swagger/Postman. | JSON |
+
+---
+
 ## 🧑‍💻 Quickstart Guide
 
 ### 1. Download & Install

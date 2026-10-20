@@ -535,4 +535,18 @@ def test_update_manager_check_and_download(tmp_path, monkeypatch):
     inst_res = UpdateManager.install_apk(dest_file)
     assert inst_res["success"] is True
 
+def test_ai_doc_endpoints():
+    res_llms = client.get("/llms.txt")
+    assert res_llms.status_code == 200
+    assert "OpenSMS" in res_llms.text
+
+    res_md = client.get("/docs/markdown")
+    assert res_md.status_code == 200
+    assert "OpenSMS" in res_md.text
+
+    res_ai = client.get("/docs/ai")
+    assert res_ai.status_code == 200
+    assert "OpenSMS" in res_ai.text
+
+
 

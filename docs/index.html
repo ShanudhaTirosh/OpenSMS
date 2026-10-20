@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenSMS Documentation • High-Performance Android SMS Gateway</title>
+  <meta name="description" content="Complete documentation for OpenSMS - turns any Android device into an SMS Gateway REST API with SQLite WAL persistence, Dual-SIM routing, and Tailscale WireGuard Mesh.">
+  <link rel="icon" type="image/png" href="../app/data/images/favicont512.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="top-nav">
+    <a href="#" class="brand-section">
+      <img src="../app/data/images/favicont512.png" alt="OpenSMS Logo" class="brand-logo" onerror="this.src='https://raw.githubusercontent.com/ShanudhaTirosh/OpenSMS/main/app/data/images/favicont512.png'">
+      <span class="brand-title">OpenSMS</span>
+      <span class="version-pill">v0.4.0</span>
+    </a>
+
+    <div class="header-search">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="docSearchInput" placeholder="Search documentation, endpoints, guides...">
+    </div>
+
+    <div class="nav-actions">
+      <button class="theme-btn" id="themeToggle">☀️ Light</button>
+      <a href="llms.txt" target="_blank" class="icon-btn" title="AI Machine-Readable Index">🤖 AI View</a>
+      <a href="openapi.json" target="_blank" class="icon-btn" title="OpenAPI 3.1 Specification">📋 OpenAPI</a>
+      <a href="https://github.com/ShanudhaTirosh/OpenSMS" target="_blank" class="icon-btn btn-primary">GitHub ↗</a>
+    </div>
+  </header>
+
+  <!-- Documentation Layout -->
+  <div class="docs-layout">
+
+    <!-- Left Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-category">
+        <div class="category-title">Getting Started</div>
+        <ul class="sidebar-menu">
+          <li><a href="#overview" class="sidebar-link active"><span>📖</span> Overview</a></li>
+          <li><a href="#whats-new" class="sidebar-link"><span>✨</span> What's New in v0.4.0</a></li>
+          <li><a href="#quickstart" class="sidebar-link"><span>🚀</span> Quickstart & Run</a></li>
+          <li><a href="#mesh-network" class="sidebar-link"><span>🌐</span> Cross-Network Mesh</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-category">
+        <div class="category-title">Interactive Tool</div>
+        <ul class="sidebar-menu">
+          <li><a href="#playground" class="sidebar-link"><span>⚡</span> Live API Playground</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-category">
+        <div class="category-title">REST API Reference</div>
+        <ul class="sidebar-menu">
+          <li><a href="#authentication" class="sidebar-link"><span>🔐</span> Authentication</a></li>
+          <li><a href="#endpoint-send-sms" class="sidebar-link"><span>📤</span> POST /sms/</a></li>
+          <li><a href="#endpoint-batch-sms" class="sidebar-link"><span>📦</span> POST /sms/batch/</a></li>
+          <li><a href="#endpoint-status" class="sidebar-link"><span>🔎</span> GET /sms/{id}</a></li>
+          <li><a href="#endpoint-history" class="sidebar-link"><span>📜</span> GET /sms/history/</a></li>
+          <li><a href="#endpoint-stats" class="sidebar-link"><span>📊</span> GET /system/stats/</a></li>
+          <li><a href="#endpoint-sims" class="sidebar-link"><span>📶</span> GET /system/sims/</a></li>
+          <li><a href="#endpoint-update" class="sidebar-link"><span>🔄</span> GET /system/update/</a></li>
+          <li><a href="#endpoint-health" class="sidebar-link"><span>💓</span> GET /health/</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-category">
+        <div class="category-title">AI & Agents</div>
+        <ul class="sidebar-menu">
+          <li><a href="#ai-integration" class="sidebar-link"><span>🤖</span> AI Agent Integration <span class="ai-badge">AI</span></a></li>
+          <li><a href="llms.txt" class="sidebar-link"><span>📄</span> llms.txt standard</a></li>
+          <li><a href="llms-full.txt" class="sidebar-link"><span>📑</span> llms-full.txt bundle</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-category">
+        <div class="category-title">Language SDKs</div>
+        <ul class="sidebar-menu">
+          <li><a href="#sdk-python" class="sidebar-link"><span>🐍</span> Python (requests/httpx)</a></li>
+          <li><a href="#sdk-typescript" class="sidebar-link"><span>🟦</span> TypeScript & Node.js</a></li>
+          <li><a href="#sdk-go" class="sidebar-link"><span>🔷</span> Go</a></li>
+          <li><a href="#sdk-php" class="sidebar-link"><span>🐘</span> PHP</a></li>
+          <li><a href="#sdk-rust" class="sidebar-link"><span>🦀</span> Rust</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-category">
+        <div class="category-title">Hardware & Guides</div>
+        <ul class="sidebar-menu">
+          <li><a href="#dual-sim" class="sidebar-link"><span>📱</span> Dual-SIM Routing</a></li>
+          <li><a href="#persistence" class="sidebar-link"><span>💾</span> SQLite WAL Engine</a></li>
+          <li><a href="#troubleshooting" class="sidebar-link"><span>🛠️</span> Troubleshooting & FAQ</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="content-area">
+
+      <!-- Hero Section -->
+      <section class="hero-banner" id="overview">
+        <h1>OpenSMS Gateway</h1>
+        <p class="hero-tagline">
+          Turn any Android smartphone into a private, high-performance, 24/7 SMS Gateway REST API server. No paid third-party SMS SaaS, no vendor lock-in.
+        </p>
+
+        <div class="hero-badges">
+          <span class="badge-item badge-green">● v0.4.0 Production</span>
+          <span class="badge-item badge-blue">📱 Android 7.0 (API 24) to Android 15+</span>
+          <span class="badge-item badge-purple">⚡ SQLite WAL Persistence</span>
+          <span class="badge-item badge-blue">🌐 Tailscale WireGuard Mesh</span>
+          <span class="badge-item badge-green">📶 Dual-SIM Telephony</span>
+        </div>
+
+        <div class="hero-buttons">
+          <a href="#quickstart" class="theme-btn btn-primary">🚀 Quickstart Guide</a>
+          <a href="#playground" class="theme-btn">⚡ Live API Tester</a>
+          <a href="llms.txt" target="_blank" class="theme-btn">🤖 AI Markdown View</a>
+          <a href="https://github.com/ShanudhaTirosh/OpenSMS/releases/latest" target="_blank" class="theme-btn">📥 Download APK</a>
+        </div>
+      </section>
+
+      <!-- What's New in v0.4.0 -->
+      <section class="doc-section" id="whats-new">
+        <h2>✨ What's New in v0.4.0</h2>
+        <p>Version 0.4.0 introduces massive architecture upgrades, persistent tracking, auto-updating, and multi-SIM orchestration:</p>
+
+        <div class="card-grid">
+          <div class="feature-card">
+            <div class="card-icon">🚀</div>
+            <h4>1-Tap In-App Auto-Updater</h4>
+            <p>Direct background GitHub Releases checks, progress-tracked APK downloads, and native Android Package Installer invocation.</p>
+          </div>
+          <div class="feature-card">
+            <div class="card-icon">💾</div>
+            <h4>SQLite WAL Persistence</h4>
+            <p>Replaced ephemeral memory with a robust SQLite engine operating in Write-Ahead Logging mode for thread-safe message tracking.</p>
+          </div>
+          <div class="feature-card">
+            <div class="card-icon">📶</div>
+            <h4>Dual-SIM Carrier Routing</h4>
+            <p>Android <code>SubscriptionManager</code> integration with in-app slot switching (Auto, SIM 1, SIM 2) and per-request <code>sim_slot</code> overrides.</p>
+          </div>
+          <div class="feature-card">
+            <div class="card-icon">📊</div>
+            <h4>Live Home Metrics Dashlet</h4>
+            <p>Real-time telemetry showing Sent Today counters, Success Rate percentages, and Queue Depth directly on the home gateway card.</p>
+          </div>
+          <div class="feature-card">
+            <div class="card-icon">🔐</div>
+            <h4>Multi-Token API Security</h4>
+            <p>Multiple named API keys with granular scopes (<code>sms:write</code>, <code>sms:read</code>, <code>admin</code>) and individual revocation.</p>
+          </div>
+          <div class="feature-card">
+            <div class="card-icon">🤖</div>
+            <h4>AI Agent First-Class Support</h4>
+            <p>Native <code>llms.txt</code>, <code>llms-full.txt</code>, direct Markdown endpoints, and Model Context Protocol (MCP) schemas.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quickstart Guide -->
+      <section class="doc-section" id="quickstart">
+        <h2>🚀 Quickstart & How to Run</h2>
+        <p>Set up your Android phone as a dedicated SMS gateway in 4 simple steps:</p>
+
+        <h3>Step 1: Download & Install APK</h3>
+        <p>Download the latest release APK from <a href="https://github.com/ShanudhaTirosh/OpenSMS/releases/latest" target="_blank">GitHub Releases</a>. Install the APK on your device (temporarily allow installation from unknown sources).</p>
+
+        <h3>Step 2: Grant Permissions</h3>
+        <p>When launching OpenSMS, grant <strong>SMS</strong>, <strong>WakeLock</strong>, and <strong>Notification</strong> permissions.</p>
+        <div class="callout callout-amber">
+          <div class="callout-title">⚠️ Android 13+ "Restricted Settings" Bypass</div>
+          On Android 13, 14, and 15+, SMS permissions are restricted on sideloaded apps by default. To unlock:
+          <ol style="margin-left: 20px; margin-top: 6px;">
+            <li>Go to <strong>Settings</strong> → <strong>Apps</strong> → <strong>OpenSMS</strong>.</li>
+            <li>Tap the <strong>three dots (⋮)</strong> in the top-right corner.</li>
+            <li>Tap <strong>Allow restricted settings</strong>.</li>
+            <li>Return to <strong>Permissions</strong> and enable <strong>SMS</strong>.</li>
+          </ol>
+        </div>
+
+        <h3>Step 3: Start Server & Generate API Key</h3>
+        <p>Tap <strong>Start Server</strong> on the main screen. If prompted, tap <strong>Generate</strong> to create your cryptographically secure Bearer token (<code>osms_...</code>) and copy it to your clipboard.</p>
+
+        <h3>Step 4: Dispatch Your First SMS</h3>
+        <div class="code-container">
+          <div class="code-header">
+            <span>Terminal (cURL)</span>
+            <button class="copy-btn">Copy</button>
+          </div>
+          <pre><code>curl -i -X POST 'http://&lt;DEVICE_IP&gt;:9292/sms/' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer osms_your_secret_key' \
+  -d '{
+    "number": "+1234567890",
+    "text": "Hello world from OpenSMS Gateway!"
+  }'</code></pre>
+        </div>
+      </section>
+
+      <!-- Cross-Network Mesh -->
+      <section class="doc-section" id="mesh-network">
+        <h2>🌐 Cross-Network Connectivity (Tailscale Mesh)</h2>
+        <p>
+          When your phone is on cellular mobile data (CGNAT) and your cloud server or laptop is on a different network, you do not need open ports or router port forwarding. Use <strong>Tailscale WireGuard Mesh</strong>:
+        </p>
+        <ol style="margin-left: 20px; margin-bottom: 16px; color: var(--text-secondary);">
+          <li>Install <a href="https://tailscale.com" target="_blank">Tailscale</a> on your Android phone and on your server/laptop.</li>
+          <li>Log in with the same account on both devices.</li>
+          <li>Open the <strong>Mesh</strong> tab inside OpenSMS. OpenSMS automatically detects the <code>100.x.y.z</code> Tailscale CGNAT IP address and shows the green <strong>Connected</strong> pill.</li>
+          <li>Now simply target <code>http://100.x.y.z:9292/sms/</code> from anywhere in the world!</li>
+        </ol>
+      </section>
+
+      <!-- Interactive API Playground -->
+      <section class="doc-section" id="playground">
+        <h2>⚡ Live API Tester & Code Generator</h2>
+        <p>Configure your gateway parameters below to dynamically generate instant, runnable client code in cURL, Python, and Node.js:</p>
+
+        <div class="playground-box">
+          <div class="playground-grid">
+            <div class="input-group">
+              <label>Device IP / Hostname</label>
+              <input type="text" id="pgDeviceIp" value="100.85.12.34" placeholder="e.g. 192.168.1.150 or 100.x.y.z">
+            </div>
+            <div class="input-group">
+              <label>Port</label>
+              <input type="text" id="pgPort" value="9292" placeholder="9292">
+            </div>
+            <div class="input-group">
+              <label>API Key</label>
+              <input type="text" id="pgApiKey" value="osms_demo_key_77a9c" placeholder="osms_...">
+            </div>
+            <div class="input-group">
+              <label>Recipient Phone Number</label>
+              <input type="text" id="pgNumber" value="+1234567890" placeholder="+1234567890">
+            </div>
+            <div class="input-group">
+              <label>Preferred SIM Slot</label>
+              <select id="pgSimSlot">
+                <option value="0" selected>SIM 1 (Slot 0)</option>
+                <option value="1">SIM 2 (Slot 1)</option>
+                <option value="-1">System Default</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="input-group" style="margin-bottom: 20px;">
+            <label>Message Content</label>
+            <input type="text" id="pgMessage" value="Your OTP code is 938102. Expires in 5 minutes.">
+          </div>
+
+          <div class="code-container interactive-output">
+            <div class="code-header">
+              <div class="code-tabs">
+                <button class="code-tab active" data-lang="curl">cURL</button>
+                <button class="code-tab" data-lang="python">Python</button>
+                <button class="code-tab" data-lang="node">Node.js</button>
+              </div>
+              <button class="copy-btn">Copy</button>
+            </div>
+            <pre data-lang="curl" id="pgCurlOutput" style="display: block;"><code>Loading...</code></pre>
+            <pre data-lang="python" id="pgPythonOutput" style="display: none;"><code>Loading...</code></pre>
+            <pre data-lang="node" id="pgNodeOutput" style="display: none;"><code>Loading...</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- REST API Reference -->
+      <section class="doc-section" id="authentication">
+        <h2>🔐 Authentication & Rate Limiting</h2>
+        <p>All API endpoints except <code>/health/</code> and <code>/llms.txt</code> require Bearer token authentication:</p>
+        <div class="code-container">
+          <div class="code-header"><span>HTTP Header</span></div>
+          <pre><code>Authorization: Bearer osms_your_secret_api_key</code></pre>
+        </div>
+        <p><strong>Brute-Force Rate Limiting:</strong> A maximum of 5 failed authentication attempts per IP address is permitted within a 60-second sliding window. Exceeding this returns HTTP <code>429 Too Many Requests</code>.</p>
+      </section>
+
+      <!-- POST /sms/ -->
+      <section class="doc-section" id="endpoint-send-sms">
+        <div class="endpoint-badge method-post">POST /sms/</div>
+        <h2>Send Single SMS</h2>
+        <p>Dispatches an SMS to a single recipient with automatic phone sanitization and optional dual-SIM slot selection.</p>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>number</code></td><td>string</td><td><strong>Yes</strong></td><td>Destination phone number in international E.164 format.</td></tr>
+              <tr><td><code>text</code></td><td>string</td><td><strong>Yes</strong></td><td>Message text body. Plain text (GSM-7) or Unicode (UCS-2).</td></tr>
+              <tr><td><code>sim_slot</code></td><td>integer</td><td>No</td><td>Carrier slot index (<code>0</code> for SIM 1, <code>1</code> for SIM 2).</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="code-container">
+          <div class="code-header"><span>Example Response (200 OK)</span><button class="copy-btn">Copy</button></div>
+          <pre><code>{
+  "id": "msg_9f3b81ca7d2e4018",
+  "number": "+1234567890",
+  "stat": true,
+  "sim_slot": 0,
+  "segments": 1,
+  "encoding": "GSM-7"
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- POST /sms/batch/ -->
+      <section class="doc-section" id="endpoint-batch-sms">
+        <div class="endpoint-badge method-post">POST /sms/batch/</div>
+        <h2>Send Batch SMS (Up to 100 Recipients)</h2>
+        <p>Dispatches multiple messages sequentially with automated 100ms hardware pacing delay to prevent cellular baseband radio saturation.</p>
+
+        <div class="code-container">
+          <div class="code-header"><span>Request Body</span><button class="copy-btn">Copy</button></div>
+          <pre><code>{
+  "sim_slot": 0,
+  "messages": [
+    { "number": "+1234567890", "text": "System alert: CPU load normal." },
+    { "number": "+1987654321", "text": "System alert: CPU load normal." }
+  ]
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- GET /sms/{id} -->
+      <section class="doc-section" id="endpoint-status">
+        <div class="endpoint-badge method-get">GET /sms/{id}</div>
+        <h2>Get SMS Delivery Status by ID</h2>
+        <p>Retrieves persistent message lifecycle status (<code>queued</code>, <code>sending</code>, <code>sent</code>, <code>failed</code>), timestamps, and cellular carrier error details from SQLite.</p>
+
+        <div class="code-container">
+          <div class="code-header"><span>Response (200 OK)</span><button class="copy-btn">Copy</button></div>
+          <pre><code>{
+  "id": "msg_9f3b81ca7d2e4018",
+  "recipient": "+1234567890",
+  "text": "Hello from OpenSMS!",
+  "encoding": "GSM-7",
+  "segments": 1,
+  "sim_slot": 0,
+  "status": "sent",
+  "created_at": 1729432800.12,
+  "delivered_at": 1729432801.45,
+  "carrier_error": null
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- GET /sms/history/ -->
+      <section class="doc-section" id="endpoint-history">
+        <div class="endpoint-badge method-get">GET /sms/history/</div>
+        <h2>List Historical Messages</h2>
+        <p>Paginated history with query parameters: <code>limit</code> (default 50), <code>offset</code>, <code>status</code> (<code>all</code>, <code>sent</code>, <code>failed</code>, <code>queued</code>), and <code>search</code>.</p>
+      </section>
+
+      <!-- GET /system/stats/ -->
+      <section class="doc-section" id="endpoint-stats">
+        <div class="endpoint-badge method-get">GET /system/stats/</div>
+        <h2>System Telemetry & Live Metrics</h2>
+        <p>Returns live gateway metrics including messages sent today, success rate %, and active queue depth.</p>
+      </section>
+
+      <!-- GET /system/sims/ -->
+      <section class="doc-section" id="endpoint-sims">
+        <div class="endpoint-badge method-get">GET /system/sims/</div>
+        <h2>List Active SIM Slots</h2>
+        <p>Detects and lists active cellular SIM slots and carrier network names via Android <code>SubscriptionManager</code>.</p>
+      </section>
+
+      <!-- GET /system/update/ -->
+      <section class="doc-section" id="endpoint-update">
+        <div class="endpoint-badge method-get">GET /system/update/</div>
+        <h2>Check for GitHub Updates</h2>
+        <p>Queries GitHub Releases to check if a newer OpenSMS APK is available.</p>
+      </section>
+
+      <!-- GET /health/ -->
+      <section class="doc-section" id="endpoint-health">
+        <div class="endpoint-badge method-get">GET /health/</div>
+        <h2>Health Check</h2>
+        <p>Unauthenticated liveness probe returning <code>{"status": "ok", "service": "OpenSMS", "version": "0.4.0"}</code>.</p>
+      </section>
+
+      <!-- AI & LLM Agent Integration -->
+      <section class="doc-section" id="ai-integration">
+        <h2>🤖 AI Agent & LLM Integration (AI View)</h2>
+        <p>
+          OpenSMS provides native machine-readable documentation and tool-calling schemas so LLMs (ChatGPT, Claude, Cursor, LangChain, MCP) can seamlessly control cellular SMS messaging.
+        </p>
+
+        <div class="card-grid">
+          <div class="feature-card">
+            <h4>📄 llms.txt</h4>
+            <p>Standard discovery index for LLM agents. <a href="llms.txt" target="_blank">Open llms.txt ↗</a></p>
+          </div>
+          <div class="feature-card">
+            <h4>📑 llms-full.txt</h4>
+            <p>Consolidated context bundle for full LLM context ingestion. <a href="llms-full.txt" target="_blank">Open llms-full.txt ↗</a></p>
+          </div>
+          <div class="feature-card">
+            <h4>📋 OpenAPI 3.1</h4>
+            <p>Machine-readable JSON schema for automated tool generators. <a href="openapi.json" target="_blank">Open openapi.json ↗</a></p>
+          </div>
+        </div>
+
+        <h3>OpenAI Function / Tool Calling Schema</h3>
+        <div class="code-container">
+          <div class="code-header"><span>JSON Tool Definition</span><button class="copy-btn">Copy</button></div>
+          <pre><code>{
+  "type": "function",
+  "function": {
+    "name": "send_cellular_sms",
+    "description": "Send a real cellular SMS text message via the OpenSMS Android gateway.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "number": { "type": "string", "description": "Recipient phone number in E.164 format (+1234567890)" },
+        "text": { "type": "string", "description": "The message body text to send." },
+        "sim_slot": { "type": "integer", "description": "Optional: 0 for SIM 1, 1 for SIM 2" }
+      },
+      "required": ["number", "text"]
+    }
+  }
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Multi-Language Code SDKs -->
+      <section class="doc-section" id="sdk-python">
+        <h2>🐍 Python SDK Integration</h2>
+        <div class="code-container">
+          <div class="code-header"><span>Python (requests)</span><button class="copy-btn">Copy</button></div>
+          <pre><code>import requests
+
+def send_sms(number: str, message: str, sim_slot: int = 0):
+    url = "http://100.85.12.34:9292/sms/"
+    headers = {
+        "Authorization": "Bearer osms_your_secret_key",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "number": number,
+        "text": message,
+        "sim_slot": sim_slot
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    return response.json()
+
+print(send_sms("+1234567890", "Alert from Python server!"))</code></pre>
+        </div>
+      </section>
+
+      <section class="doc-section" id="sdk-typescript">
+        <h2>🟦 TypeScript & Node.js Integration</h2>
+        <div class="code-container">
+          <div class="code-header"><span>TypeScript (fetch)</span><button class="copy-btn">Copy</button></div>
+          <pre><code>async function sendSms(number: string, text: string) {
+  const response = await fetch("http://100.85.12.34:9292/sms/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer osms_your_secret_key"
+    },
+    body: JSON.stringify({ number, text, sim_slot: 0 })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to send SMS: ${await response.text()}`);
+  }
+  return response.json();
+}</code></pre>
+        </div>
+      </section>
+
+      <section class="doc-section" id="sdk-go">
+        <h2>🔷 Go Integration</h2>
+        <div class="code-container">
+          <div class="code-header"><span>Go</span><button class="copy-btn">Copy</button></div>
+          <pre><code>package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"number":   "+1234567890",
+		"text":     "Alert from Go service",
+		"sim_slot": 0,
+	})
+
+	req, _ := http.NewRequest("POST", "http://100.85.12.34:9292/sms/", bytes.NewBuffer(payload))
+	req.Header.Set("Authorization", "Bearer osms_your_secret_key")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, _ := client.Do(req)
+	defer resp.Body.Close()
+	fmt.Println("Status:", resp.Status)
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Dual-SIM Guide -->
+      <section class="doc-section" id="dual-sim">
+        <h2>📱 Dual-SIM Telephony Architecture</h2>
+        <p>
+          OpenSMS uses Android's native <code>SubscriptionManager</code> to discover all active carrier SIM cards. You can toggle between <strong>Auto</strong>, <strong>SIM 1</strong>, and <strong>SIM 2</strong> in the in-app Settings, or dynamically pass <code>"sim_slot": 0</code> or <code>"sim_slot": 1</code> in any API request.
+        </p>
+      </section>
+
+      <!-- SQLite Persistence -->
+      <section class="doc-section" id="persistence">
+        <h2>💾 SQLite WAL Persistence</h2>
+        <p>
+          Starting in v0.4.0, all messages, delivery timestamps, API keys, and metrics are persisted in a local SQLite database operating in <strong>Write-Ahead Logging (WAL)</strong> mode. This ensures maximum concurrency and zero locking between background FastAPI server threads and the Kivy UI.
+        </p>
+      </section>
+
+      <!-- Troubleshooting -->
+      <section class="doc-section" id="troubleshooting">
+        <h2>🛠️ Troubleshooting & FAQ</h2>
+        <div class="card-grid">
+          <div class="feature-card">
+            <h4>Device stops receiving requests</h4>
+            <p>Ensure battery optimization for OpenSMS is set to <strong>Unrestricted</strong>. On MIUI/OneUI, enable <strong>Autostart</strong>.</p>
+          </div>
+          <div class="feature-card">
+            <h4>SMS Fails with Carrier Error</h4>
+            <p>Ensure the SIM card has an active text messaging plan and sufficient credit. Verify cellular signal bars on the status bar.</p>
+          </div>
+          <div class="feature-card">
+            <h4>Messages > 160 Characters</h4>
+            <p>OpenSMS automatically divides long messages into multipart segments. Emojis trigger UCS-2 Unicode mode (70 chars/segment).</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer>
+        <div>
+          OpenSMS v0.4.0 • Developed & Maintained by <a href="https://info.shanutechx.com" target="_blank">Shanudha Tirosh</a>.
+        </div>
+        <div>
+          Licensed under the <a href="../LICENSE" target="_blank">Apache License 2.0</a>.
+        </div>
+      </footer>
+
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

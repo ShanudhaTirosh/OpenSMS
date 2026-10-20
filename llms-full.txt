@@ -1,0 +1,481 @@
+# OpenSMS Complete API & Architecture Reference for AI Agents & Developers
+Version: 0.4.0
+License: Apache 2.0
+Repository: https://github.com/ShanudhaTirosh/OpenSMS
+Maintained by: Shanudha Tirosh (https://info.shanutechx.com)
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. System Overview & Architecture
+2. What's New in Version 0.4.0
+3. Network Topology & Cross-Network Connectivity
+4. Authentication & Security Model
+5. Complete REST API Specifications
+6. Dual-SIM Telephony & SMS Segmentation Rules
+7. Multi-Language Code Integration Recipes (Python, TS, Go, PHP, Rust, C#, Java)
+8. AI Agent Tool-Calling Schemas (OpenAI, Claude, LangChain, FastMCP)
+9. Error Codes & Troubleshooting
+
+================================================================================
+1. SYSTEM OVERVIEW & ARCHITECTURE
+================================================================================
+OpenSMS converts any Android smartphone or tablet (running Android 7.0 / API 24 to Android 15+ / API 36) into a high-performance, private, 24/7 SMS Gateway.
+
+Key Components:
+- Background Gateway Server: FastAPI application powered by Uvicorn running inside a Python service on Android.
+- SQLite WAL Persistence: High-throughput local relational store operating in Write-Ahead Logging mode (`PRAGMA journal_mode = WAL`) with busy timeouts. Keeps message history, delivery statuses (`queued`, `sending`, `sent`, `failed`), multi-key token registry, and telemetry metrics.
+- Telephony Orchestration Engine: Built via PyJNIus interacting directly with native Android `SmsManager` and `SubscriptionManager`. Handles GSM-7 vs UCS-2 character classification, multipart segmentation, and dual-SIM routing.
+- WireGuard Mesh Integration: Live auto-detection of Tailscale CGNAT IP addresses (`100.64.0.0/10`), providing zero-config connectivity between cloud VPS, local machines, and Android devices across different networks.
+- Auto-Updater Subsystem: Queries GitHub Releases API, downloads release APKs in streamed chunks with progress tracking, and invokes the Android Package Installer via `Intent(ACTION_VIEW)` and `FileProvider`.
+
+Default Configuration:
+- Port: 9292 (configurable from 1025 to 65535)
+- Binding: 0.0.0.0 (listens on Wi-Fi, Ethernet, and Tailscale VPN interfaces)
+
+================================================================================
+2. WHAT'S NEW IN VERSION 0.4.0
+================================================================================
+- In-App GitHub Releases Auto-Updater: Detects newer releases on app launch, displays an animated notification banner on Home screen, and supports 1-tap in-app APK download and install.
+- SQLite Message Store & Metrics: Replaced ephemeral in-memory state with SQLite WAL persistence. Tracks delivery receipts, carrier errors, sent today count, success rate %, and queue depth.
+- Dual-SIM Telephony Routing: Multi-SIM autodetection via Android `SubscriptionManager`. Allows carrier slot selection in Settings (Auto, SIM 1, SIM 2) and programmatic routing via `sim_slot` in the REST API.
+- Multi-Token API Security: Allows multiple named API keys with granular scopes (`sms:send`, `sms:read`, `admin`) and individual revocation while maintaining backwards compatibility with `keys.json`.
+- Expanded REST API: Added `GET /sms/{id}`, `GET /sms/history/`, `GET /system/stats/`, `GET /system/sims/`, and `GET /system/update/`.
+- UI/UX & Bug Fixes: Guarded settings switches against KivyMD 2.x event loops (BUG-03 fix) and added background-to-foreground IPC activity heartbeats.
+
+================================================================================
+3. NETWORK TOPOLOGY & CROSS-NETWORK CONNECTIVITY
+================================================================================
+OpenSMS binds to all network interfaces on the device:
+1. Local Wi-Fi / LAN: Accessible at `http://192.168.x.x:9292` by other machines on the same local router.
+2. Tailscale WireGuard Mesh (Recommended): Accessible at `http://100.x.y.z:9292` from any machine in the same Tailnet, bypassing cellular CGNAT and firewall restrictions without port forwarding.
+3. Reverse SSH Tunnel: Using Termux on Android: `ssh -N -R 9292:localhost:9292 user@vps.com`.
+4. Cloudflare Tunnel / Ngrok: Accessible via public HTTPS URL if exposed through a tunnel agent.
+
+================================================================================
+4. AUTHENTICATION & SECURITY MODEL
+================================================================================
+- Mechanism: Bearer Token authentication via HTTP Header:
+    Authorization: Bearer <API_KEY>
+- Token format: High-entropy string generated with `secrets.token_urlsafe(32)` prefixed with `osms_`.
+- Storage: Tokens are hashed with SHA-256 before insertion into SQLite. Plaintext tokens are wiped from RAM after generation.
+- Rate Limiting: 5 failed authentication attempts per IP within a 60-second sliding window triggers an HTTP 429 response.
+
+================================================================================
+5. COMPLETE REST API SPECIFICATIONS
+================================================================================
+
+--------------------------------------------------------------------------------
+5.1. Liveness Health Check
+--------------------------------------------------------------------------------
+GET /health/
+No authentication required.
+
+Response (200 OK):
+{
+  "status": "ok",
+  "service": "OpenSMS",
+  "version": "0.4.0"
+}
+
+--------------------------------------------------------------------------------
+5.2. Send Single SMS
+--------------------------------------------------------------------------------
+POST /sms/
+Authentication: Bearer <API_KEY>
+
+Request Body:
+{
+  "number": "+1234567890",       // Required: E.164 phone number
+  "text": "Hello from OpenSMS!", // Required: SMS content
+  "sim_slot": 0                  // Optional: 0 for SIM 1, 1 for SIM 2 (default: system preference)
+}
+
+Response (200 OK):
+{
+  "id": "msg_9f3b81ca7d2e4018",
+  "number": "+1234567890",
+  "stat": true,
+  "sim_slot": 0,
+  "segments": 1,
+  "encoding": "GSM-7"
+}
+
+Errors:
+- 400 Bad Request: Number format invalid or text empty.
+- 401 Unauthorized: Invalid or missing API key.
+- 429 Too Many Requests: Rate limit exceeded.
+- 500 Internal Server Error: Cellular modem error.
+
+--------------------------------------------------------------------------------
+5.3. Send Batch SMS
+--------------------------------------------------------------------------------
+POST /sms/batch/
+Authentication: Bearer <API_KEY>
+
+Request Body (up to 100 messages):
+{
+  "sim_slot": 0,
+  "messages": [
+    { "number": "+1234567890", "text": "Notification 1" },
+    { "number": "+1987654321", "text": "Notification 2" }
+  ]
+}
+
+Response (200 OK):
+{
+  "batch_id": "batch_98fbc102",
+  "total": 2,
+  "successful": 2,
+  "failed": 0,
+  "results": [
+    { "id": "msg_01", "number": "+1234567890", "stat": true },
+    { "id": "msg_02", "number": "+1987654321", "stat": true }
+  ]
+}
+
+--------------------------------------------------------------------------------
+5.4. Get SMS Status by ID
+--------------------------------------------------------------------------------
+GET /sms/{id}
+Authentication: Bearer <API_KEY>
+
+Response (200 OK):
+{
+  "id": "msg_9f3b81ca7d2e4018",
+  "recipient": "+1234567890",
+  "text": "Hello from OpenSMS!",
+  "encoding": "GSM-7",
+  "segments": 1,
+  "sim_slot": 0,
+  "status": "sent", // "queued" | "sending" | "sent" | "failed"
+  "created_at": 1729432800.12,
+  "delivered_at": 1729432801.45,
+  "carrier_error": null
+}
+
+--------------------------------------------------------------------------------
+5.5. List SMS History
+--------------------------------------------------------------------------------
+GET /sms/history/?limit=50&offset=0&status=all&search=+1234
+Authentication: Bearer <API_KEY>
+
+Response (200 OK):
+{
+  "count": 1,
+  "offset": 0,
+  "limit": 50,
+  "messages": [
+    {
+      "id": "msg_9f3b81ca7d2e4018",
+      "recipient": "+1234567890",
+      "text": "Hello from OpenSMS!",
+      "status": "sent",
+      "encoding": "GSM-7",
+      "segments": 1,
+      "sim_slot": 0,
+      "created_at": 1729432800.12,
+      "delivered_at": 1729432801.45
+    }
+  ]
+}
+
+--------------------------------------------------------------------------------
+5.6. Get System Stats & Telemetry
+--------------------------------------------------------------------------------
+GET /system/stats/
+Authentication: Bearer <API_KEY>
+
+Response (200 OK):
+{
+  "app": "OpenSMS",
+  "version": "0.4.0",
+  "metrics": {
+    "sent_today": 142,
+    "failed_today": 1,
+    "success_rate": 99.3,
+    "queue_depth": 0
+  }
+}
+
+--------------------------------------------------------------------------------
+5.7. Get Active SIM Slots
+--------------------------------------------------------------------------------
+GET /system/sims/
+Authentication: Bearer <API_KEY>
+
+Response (200 OK):
+{
+  "count": 2,
+  "sims": [
+    { "slot": 0, "carrier": "T-Mobile", "country": "us", "active": true },
+    { "slot": 1, "carrier": "AT&T", "country": "us", "active": true }
+  ]
+}
+
+--------------------------------------------------------------------------------
+5.8. Check for App Updates
+--------------------------------------------------------------------------------
+GET /system/update/
+Authentication: Bearer <API_KEY>
+
+Response (200 OK):
+{
+  "success": true,
+  "has_update": false,
+  "current_version": "0.4.0",
+  "latest_version": "0.4.0",
+  "tag_name": "v0.4.0",
+  "release_name": "OpenSMS v0.4.0",
+  "release_notes": "Added SQLite WAL persistence and auto-updater.",
+  "html_url": "https://github.com/ShanudhaTirosh/OpenSMS/releases/tag/v0.4.0",
+  "apk_url": "https://github.com/.../OpenSMS.apk",
+  "apk_size": 18452100
+}
+
+================================================================================
+6. DUAL-SIM TELEPHONY & SMS SEGMENTATION RULES
+================================================================================
+Character Encoding & Segment Calculation:
+- Standard GSM 7-bit alphabet:
+  - Single SMS: up to 160 characters.
+  - Multi-part SMS: 153 characters per segment (7 bytes reserved for UDH header).
+- Unicode (UCS-2) encoding (triggered when emojis, Cyrillic, Arabic, Chinese, etc. are used):
+  - Single SMS: up to 70 characters.
+  - Multi-part SMS: 67 characters per segment.
+
+Dual-SIM Selection:
+- If `sim_slot` is omitted in the API request, the gateway uses the user's preferred SIM slot configured in the app settings, or the Android OS default subscription.
+- Set `sim_slot: 0` for SIM 1, or `sim_slot: 1` for SIM 2.
+
+================================================================================
+7. MULTI-LANGUAGE CODE INTEGRATION RECIPES
+================================================================================
+
+--- 7.1. Python (requests) ---
+```python
+import requests
+
+url = "http://100.85.x.x:9292/sms/"
+headers = {
+    "Authorization": "Bearer osms_your_secret_key",
+    "Content-Type": "application/json"
+}
+payload = {
+    "number": "+1234567890",
+    "text": "Hello from Python!",
+    "sim_slot": 0
+}
+res = requests.post(url, json=payload, headers=headers)
+print(res.json())
+```
+
+--- 7.2. Python (httpx async) ---
+```python
+import asyncio
+import httpx
+
+async def send_sms():
+    async with httpx.AsyncClient() as client:
+        res = await client.post(
+            "http://100.85.x.x:9292/sms/",
+            json={"number": "+1234567890", "text": "Async SMS dispatched!"},
+            headers={"Authorization": "Bearer osms_your_secret_key"}
+        )
+        return res.json()
+
+asyncio.run(send_sms())
+```
+
+--- 7.3. Node.js & TypeScript (fetch) ---
+```typescript
+interface SmsResponse {
+  id: string;
+  number: string;
+  stat: boolean;
+  sim_slot: number;
+}
+
+async function sendSms(number: string, text: string): Promise<SmsResponse> {
+  const res = await fetch("http://100.85.x.x:9292/sms/", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer osms_your_secret_key",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ number, text, sim_slot: 0 })
+  });
+
+  if (!res.ok) {
+    throw new Error(`SMS send failed with status ${res.status}: ${await res.text()}`);
+  }
+  return res.json() as Promise<SmsResponse>;
+}
+```
+
+--- 7.4. Go ---
+```go
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"number":   "+1234567890",
+		"text":     "Alert from Go service",
+		"sim_slot": 0,
+	})
+
+	req, _ := http.NewRequest("POST", "http://100.85.x.x:9292/sms/", bytes.NewBuffer(payload))
+	req.Header.Set("Authorization", "Bearer osms_your_secret_key")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+	fmt.Println("Status:", resp.Status)
+}
+```
+
+--- 7.5. cURL ---
+```bash
+curl -i -X POST 'http://100.85.x.x:9292/sms/' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer osms_your_secret_key' \
+  -d '{"number": "+1234567890", "text": "Verification Code: 948192"}'
+```
+
+--- 7.6. PHP ---
+```php
+<?php
+$ch = curl_init('http://100.85.x.x:9292/sms/');
+$payload = json_encode([
+    'number' => '+1234567890',
+    'text' => 'Hello from PHP Backend',
+    'sim_slot' => 0
+]);
+
+curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    'Content-Type: application/json',
+    'Authorization: Bearer osms_your_secret_key'
+]);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+$result = curl_exec($ch);
+curl_close($ch);
+echo $result;
+?>
+```
+
+--- 7.7. Rust (reqwest) ---
+```rust
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut headers = HeaderMap::new();
+    headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer osms_your_secret_key"));
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    let client = reqwest::Client::new();
+    let body = json!({
+        "number": "+1234567890",
+        "text": "Dispatched via Rust!"
+    });
+
+    let resp = client.post("http://100.85.x.x:9292/sms/")
+        .headers(headers)
+        .json(&body)
+        .send()
+        .await?;
+
+    println!("Response: {:?}", resp.text().await?);
+    Ok(())
+}
+```
+
+================================================================================
+8. AI AGENT TOOL-CALLING SCHEMAS
+================================================================================
+
+OpenAI Function Schema:
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "send_sms",
+    "description": "Send a real cellular SMS text message to a recipient phone number via the OpenSMS Android gateway.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "string",
+          "description": "Recipient phone number with country code in E.164 format (e.g. +1234567890)."
+        },
+        "text": {
+          "type": "string",
+          "description": "The message body text to send."
+        },
+        "sim_slot": {
+          "type": "integer",
+          "description": "Optional: 0 for SIM 1, 1 for SIM 2."
+        }
+      },
+      "required": ["number", "text"]
+    }
+  }
+}
+```
+
+Anthropic Claude Tool Schema:
+```json
+{
+  "name": "send_sms",
+  "description": "Send a real cellular SMS text message via the OpenSMS Android gateway.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "number": { "type": "string", "description": "Destination phone number in E.164 format" },
+      "text": { "type": "string", "description": "SMS text content" },
+      "sim_slot": { "type": "integer", "description": "Optional: 0 for SIM 1, 1 for SIM 2" }
+    },
+    "required": ["number", "text"]
+  }
+}
+```
+
+Model Context Protocol (MCP) Tool Declaration:
+```json
+{
+  "name": "send_sms",
+  "description": "Dispatches a real SMS message via connected OpenSMS Android phone.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "number": { "type": "string", "description": "Recipient phone number in E.164 format" },
+      "text": { "type": "string", "description": "SMS text message content" },
+      "sim_slot": { "type": "integer", "description": "SIM slot: 0 or 1" }
+    },
+    "required": ["number", "text"]
+  }
+}
+```
+
+================================================================================
+9. ERROR CODES & TROUBLESHOOTING
+================================================================================
+- 400 Bad Request: Number must contain between 7 and 15 digits. Text cannot be empty or only whitespace.
+- 401 Unauthorized: The Bearer token provided does not match any registered key or has been revoked.
+- 429 Too Many Requests: More than 5 failed authentication requests occurred from the caller's IP in the last 60 seconds.
+- 500 Internal Server Error: The cellular modem failed to transmit. Check cellular reception, carrier balance/allowance, and SIM card status.
+- Battery Sleeping / Disconnect: Ensure OpenSMS battery optimization is set to "Unrestricted" in Android settings.
+- Android 13+ SMS Permission: Enable "Allow restricted settings" in Android App Info if permissions are greyed out.
