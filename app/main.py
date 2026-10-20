@@ -38,7 +38,9 @@ from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogSupporting
 from screens.mainScr import ButtonControl, AppHomeBox
 from screens.settings import SettingsBox, ApiKeyTxtbox
 from screens.tailscaleScr import TailscaleBox
-from services.smsApi import send_sms, calculate_sms_segments, sanitize_phone_number
+from services.smsApi import send_sms, calculate_sms_segments, sanitize_phone_number, get_active_sims
+from services.dbMgr import DatabaseManager
+from services.updateMgr import UpdateManager
 
 # import services
 from services.postApi import get_api_keys, set_config_path, generate_new_api_key
@@ -82,7 +84,7 @@ class MainScreenBox(MDBoxLayout):
                 self.bottom_pad = dp(42)
 
 ## Global definitions
-__version__ = "0.3.0" # App version
+__version__ = "0.4.0" # App version
 
 
 # Determine the base path for your application's resources
@@ -109,12 +111,17 @@ class OpenSmsApp(MDApp):
         self.key_exists = False
         self.api_key = None
         self.detected_ips = ["127.0.0.1"]
+        self.is_settings_refreshing = False
+        self.latest_update_info = None
+        self.last_seen_activity = 0.0
         self.config_template = {
             "app": "opensms",
             "port": 9292,
             "boot": False,
             "wakelock": True,
             "theme": "Light",
+            "auto_update": True,
+            "sim_slot": -1,
             "tailscale": {}
         }
         self.req_template = {
@@ -198,6 +205,8 @@ class OpenSmsApp(MDApp):
                 self.config_template["boot"] = bool(saved_config.get("boot", False))
                 self.config_template["wakelock"] = bool(saved_config.get("wakelock", True))
                 self.config_template["theme"] = saved_config.get("theme", "Light")
+                self.config_template["auto_update"] = bool(saved_config.get("auto_update", True))
+                self.config_template["sim_slot"] = int(saved_config.get("sim_slot", -1))
                 if "tailscale" in saved_config and isinstance(saved_config["tailscale"], dict):
                     self.config_template["tailscale"] = saved_config["tailscale"]
             except Exception as e:
@@ -206,18 +215,13 @@ class OpenSmsApp(MDApp):
             self.req_template["port"] = int(self.config_template["port"])
             if self.config_template["boot"]:
                 self.req_template["server"] = "start"
-                auto_start_sw.active = True
                 Thread(target=self.write_request, daemon=True).start()
-            else:
-                auto_start_sw.active = False
         else:
             self.write_app_conf()
 
-        port_no_inp.text = str(self.config_template["port"])
-        wakelock_sw.active = self.config_template.get("wakelock", True)
-        dark_theme_sw.active = (self.config_template.get("theme") == "Dark")
         self.theme_style = self.config_template.get("theme", "Light")
         self.theme_cls.theme_style = self.theme_style
+        self.refresh_settings_view()
 
         # Initialize Tailscale service with saved config
         TailscaleService.init_config(self.config_template)
@@ -226,8 +230,13 @@ class OpenSmsApp(MDApp):
         if len(api_keys) >= 1:
             self.key_exists = True
 
-        # Discover network IP addresses
+        # Discover network IP addresses and refresh live metrics
         self.update_network_addresses()
+        self.update_home_metrics()
+
+        # Check for updates automatically in background if enabled
+        if self.config_template.get("auto_update", True):
+            Clock.schedule_once(lambda dt: Thread(target=self.check_for_updates_background, daemon=True).start(), 2.0)
 
         Thread(target=self.resp_check_loop, daemon=True).start()
         print("Init success...")
@@ -354,6 +363,12 @@ class OpenSmsApp(MDApp):
                                 home.ids.api_srv_btn.btn_colour = "green"
                                 self.show_toast_msg(f"Server Error: {error_detail}", is_error=True)
                             Clock.schedule_once(update_error_ui)
+
+                        # Synchronize live metrics when activity occurs
+                        last_act = resp.get("last_activity", 0.0)
+                        if last_act and last_act > self.last_seen_activity:
+                            self.last_seen_activity = last_act
+                            Clock.schedule_once(lambda dt: self.update_home_metrics())
 
                 except Exception as e:
                     # Ignore transient read collisions while file is being written
@@ -568,6 +583,8 @@ class OpenSmsApp(MDApp):
         Clock.schedule_once(lambda dt: self.show_toast_msg("Settings saved successfully."))
 
     def toggle_theme(self, switch_instance, is_active=None):
+        if self.is_settings_refreshing:
+            return
         if is_active is None:
             is_active = switch_instance.active
         new_style = "Dark" if is_active else "Light"
@@ -579,6 +596,8 @@ class OpenSmsApp(MDApp):
         Thread(target=self.write_app_conf, daemon=True).start()
 
     def toggle_wakelock_setting(self, switch_instance, is_active=None):
+        if self.is_settings_refreshing:
+            return
         if is_active is None:
             is_active = switch_instance.active
         if self.config_template.get("wakelock") == is_active:
@@ -591,6 +610,8 @@ class OpenSmsApp(MDApp):
         Thread(target=self.write_app_conf, daemon=True).start()
 
     def toggle_auto_start(self, switch_instance, is_active=None):
+        if self.is_settings_refreshing:
+            return
         if is_active is None:
             is_active = switch_instance.active
         if self.config_template.get("boot") == is_active:
@@ -598,12 +619,70 @@ class OpenSmsApp(MDApp):
         self.config_template["boot"] = is_active
         Thread(target=self.write_app_conf, daemon=True).start()
 
+    def toggle_auto_update(self, switch_instance, is_active=None):
+        if self.is_settings_refreshing:
+            return
+        if is_active is None:
+            is_active = switch_instance.active
+        if self.config_template.get("auto_update") == is_active:
+            return
+        self.config_template["auto_update"] = is_active
+        Thread(target=self.write_app_conf, daemon=True).start()
+
+    def cycle_sim_slot(self, instance=None):
+        current = self.config_template.get("sim_slot", -1)
+        next_slot = 0 if current == -1 else (1 if current == 0 else -1)
+        self.config_template["sim_slot"] = next_slot
+        self.update_sim_slot_ui()
+        Thread(target=self.write_app_conf, daemon=True).start()
+        label = "Auto" if next_slot == -1 else f"SIM {next_slot + 1}"
+        self.show_toast_msg(f"Preferred SIM set to {label}")
+
+    def update_sim_slot_ui(self):
+        try:
+            slot = self.config_template.get("sim_slot", -1)
+            txt = "Auto" if slot == -1 else f"SIM {slot + 1}"
+            supporting = "Auto-detect (System default)" if slot == -1 else f"Carrier Slot {slot + 1}"
+            if hasattr(self.root, 'ids') and 'settings_scr' in self.root.ids:
+                scr = self.root.ids.settings_scr.ids
+                if "sim_cycle_btn_txt" in scr:
+                    scr.sim_cycle_btn_txt.text = txt
+                if "sim_slot_supporting_txt" in scr:
+                    scr.sim_slot_supporting_txt.text = supporting
+        except Exception as e:
+            print(f"Notice: sim slot ui update error: {e}")
+
+    def update_home_metrics(self):
+        try:
+            db = DatabaseManager.get_instance(self.config_dir)
+            metrics = db.get_metrics()
+            if hasattr(self.root, 'ids') and 'home_scr' in self.root.ids:
+                home = self.root.ids.home_scr
+                home.metric_sent_today = str(metrics.get("sent_today", 0))
+                home.metric_success_rate = f"{metrics.get('success_rate', 100.0)}%"
+                home.metric_queue = str(metrics.get("queue_depth", 0))
+        except Exception as e:
+            print(f"Notice: home metrics update skipped: {e}")
+
     def refresh_settings_view(self):
-        scr = self.root.ids.settings_scr.ids
-        scr.auto_start_sw.active = self.config_template.get("boot", False)
-        scr.port_no_inp.text = str(self.config_template.get("port", 9292))
-        scr.wakelock_sw.active = self.config_template.get("wakelock", True)
-        scr.dark_theme_sw.active = (self.config_template.get("theme") == "Dark")
+        self.is_settings_refreshing = True
+        try:
+            scr = self.root.ids.settings_scr.ids
+            if "auto_start_sw" in scr:
+                scr.auto_start_sw.active = self.config_template.get("boot", False)
+            if "port_no_inp" in scr:
+                scr.port_no_inp.text = str(self.config_template.get("port", 9292))
+            if "wakelock_sw" in scr:
+                scr.wakelock_sw.active = self.config_template.get("wakelock", True)
+            if "dark_theme_sw" in scr:
+                scr.dark_theme_sw.active = (self.config_template.get("theme") == "Dark")
+            if "auto_update_sw" in scr:
+                scr.auto_update_sw.active = self.config_template.get("auto_update", True)
+            if "current_version_lbl" in scr:
+                scr.current_version_lbl.text = f"Current: v{__version__}"
+            self.update_sim_slot_ui()
+        finally:
+            self.is_settings_refreshing = False
 
     def confirm_reset_settings(self, instance=None):
         buttons = MDDialogButtonContainer(
@@ -770,7 +849,8 @@ class OpenSmsApp(MDApp):
             self.txt_dialog_closer()
             self.show_toast_msg(f"Sending test SMS to {phone}...")
             def worker():
-                stat = send_sms(phone, msg)
+                preferred_slot = self.config_template.get("sim_slot", -1)
+                stat = send_sms(phone, msg, sim_slot=preferred_slot)
                 if stat:
                     Clock.schedule_once(lambda dt: self.show_toast_msg(f"Test SMS sent to {phone}!"))
                 else:
@@ -826,6 +906,127 @@ class OpenSmsApp(MDApp):
             None,
             buttons
         )
+
+    ## Auto-Update Subsystem
+    def check_for_updates_background(self, show_toast_if_latest=False):
+        """Query GitHub Releases API in background."""
+        res = UpdateManager.check_for_updates(__version__)
+        if res.get("success"):
+            if res.get("has_update"):
+                self.latest_update_info = res
+                def update_banner(dt):
+                    if hasattr(self.root, 'ids') and 'home_scr' in self.root.ids:
+                        home = self.root.ids.home_scr
+                        home.has_update = True
+                        home.update_banner_text = f"⚡ Update Available • v{res.get('latest_version')} (Tap to Install)"
+                Clock.schedule_once(update_banner)
+                if show_toast_if_latest:
+                    Clock.schedule_once(lambda dt: self.show_update_dialog(res))
+            else:
+                if show_toast_if_latest:
+                    Clock.schedule_once(lambda dt: self.show_toast_msg(f"OpenSMS is up to date (v{__version__})"))
+        else:
+            if show_toast_if_latest:
+                err = res.get("error", "Failed to check for updates")
+                Clock.schedule_once(lambda dt: self.show_toast_msg(err, is_error=True))
+
+    def check_for_updates_manually(self, instance=None):
+        self.show_toast_msg("Checking for updates...")
+        Thread(target=lambda: self.check_for_updates_background(show_toast_if_latest=True), daemon=True).start()
+
+    def check_for_updates_from_drawer(self):
+        self.close_nav_drawer()
+        self.check_for_updates_manually()
+
+    def open_update_dialog_from_banner(self, instance=None):
+        if self.latest_update_info and self.latest_update_info.get("has_update"):
+            self.show_update_dialog(self.latest_update_info)
+        else:
+            self.check_for_updates_manually()
+
+    def show_update_dialog(self, update_info: dict):
+        self.txt_dialog_closer()
+        latest_ver = update_info.get("latest_version", "unknown")
+        release_name = update_info.get("release_name", f"OpenSMS v{latest_ver}")
+        notes = update_info.get("release_notes", "").strip()
+        apk_size = update_info.get("apk_size", 0)
+        size_txt = f" • {round(apk_size / (1024 * 1024), 1)} MB" if apk_size > 0 else ""
+
+        dialog_text = f"New version v{latest_ver}{size_txt} is available!\n\n"
+        if notes:
+            trimmed_notes = notes[:280] + ("..." if len(notes) > 280 else "")
+            dialog_text += f"What's New:\n{trimmed_notes}"
+
+        buttons = MDDialogButtonContainer(
+            Widget(),
+            MDButton(
+                MDButtonText(text="Later"),
+                style="text",
+                on_release=self.txt_dialog_closer
+            ),
+            MDButton(
+                MDButtonText(text="View on GitHub"),
+                style="text",
+                on_release=lambda x: self.open_url_browser(update_info.get("html_url", ""))
+            ),
+            MDButton(
+                MDButtonText(text="Install Update", theme_text_color="Custom", text_color="green"),
+                style="text",
+                on_release=lambda x: self.start_download_and_install(update_info)
+            ),
+            spacing="8dp",
+        )
+        self.show_text_dialog(
+            f"Update Available: v{latest_ver}",
+            dialog_text,
+            None,
+            buttons
+        )
+
+    def start_download_and_install(self, update_info: dict):
+        self.txt_dialog_closer()
+        apk_url = update_info.get("apk_url")
+        if not apk_url:
+            self.show_toast_msg("No APK asset in release. Opening GitHub release page...")
+            self.open_url_browser(update_info.get("html_url", ""))
+            return
+
+        dest_dir = os.path.join(str(self.internal_storage), "updates")
+        target_file = os.path.join(dest_dir, f"OpenSMS-v{update_info.get('latest_version')}.apk")
+        self.show_toast_msg(f"Downloading v{update_info.get('latest_version')} in background...")
+
+        def dl_worker():
+            def progress(percent, dl_bytes, total_bytes):
+                pass
+
+            res = UpdateManager.download_apk(apk_url, target_file, progress_callback=progress)
+            if res.get("success"):
+                Clock.schedule_once(lambda dt: self.show_toast_msg("Download complete! Launching installer..."))
+                inst = UpdateManager.install_apk(target_file)
+                if not inst.get("success"):
+                    Clock.schedule_once(lambda dt: self.show_toast_msg(inst.get("error", "Installation error"), is_error=True))
+            else:
+                Clock.schedule_once(lambda dt: self.show_toast_msg(res.get("error", "Download failed"), is_error=True))
+
+        Thread(target=dl_worker, daemon=True).start()
+
+    def open_url_browser(self, url: str):
+        self.txt_dialog_closer()
+        if not url:
+            return
+        if platform == "android":
+            try:
+                Intent = autoclass('android.content.Intent')
+                Uri = autoclass('android.net.Uri')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                activity = PythonActivity.mActivity
+                intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                activity.startActivity(intent)
+                return
+            except Exception as e:
+                print(f"Error opening browser URL: {e}")
+        import webbrowser
+        webbrowser.open(url)
 
     ## Navigation Drawer helpers
     def toggle_nav_drawer(self):
@@ -1012,6 +1213,7 @@ class OpenSmsApp(MDApp):
         self.root.ids.top_back_btn.opacity = 0
         self.root.ids.top_back_btn.disabled = True
         self.update_network_addresses()
+        self.update_home_metrics()
 
     def on_tailscale_screen_entry(self, instance=None):
         self.screen_title = "OpenSMS • Remote Mesh"

@@ -147,6 +147,13 @@ MDScreen:
                                 text: "Toggle Dark Theme"
 
                         MDNavigationDrawerItem:
+                            on_release: app.check_for_updates_from_drawer()
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "cloud-search-outline"
+                            MDNavigationDrawerItemText:
+                                text: "Check for Updates"
+
+                        MDNavigationDrawerItem:
                             on_release: app.open_about_from_drawer()
                             MDNavigationDrawerItemLeadingIcon:
                                 icon: "information-outline"

@@ -67,7 +67,14 @@ def on_server_control_event(event_type: str, detail: str = ""):
         resp_template["error"] = detail
         write_resp()
 
+def on_kivy_activity_event(stat: bool = True, count: int = 1):
+    global resp_template
+    resp_template["last_activity"] = time.time()
+    resp_template["last_stat"] = stat
+    write_resp()
+
 app_api_server.set_control_caller(on_server_control_event)
+app_api_server.set_kivy_caller(on_kivy_activity_event)
 
 ## functions
 def write_resp():

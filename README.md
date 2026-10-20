@@ -11,10 +11,13 @@ Developed & maintained by **[Shanudha Tirosh](https://info.shanutechx.com)**.
 ### ✨ Key Features
 
 - 📱 **Turns your Android device into an SMS REST API gateway**.
+- 🚀 **1-Tap In-App Auto-Updater**: Automatic update checks directly against GitHub Releases, animated banner alerts, download progress reporting, and native Android APK package installation (`REQUEST_INSTALL_PACKAGES`).
+- 📊 **Live Metrics & SQLite Message Persistence**: High-performance SQLite engine operating in Write-Ahead Logging (`WAL`) mode. Tracks queued, sent, and failed messages with live home dashlet metrics (Sent Today, Success Rate %, and Queue Depth).
+- 📶 **Dual-SIM & Multi-SIM Telephony Orchestration**: Auto-detects dual SIM configurations via Android `SubscriptionManager`. Choose preferred carrier slot in Settings or dynamically route per API request using `sim_slot`.
 - 🌐 **Native Cross-Network Mesh (Tailscale Ready)**: Seamlessly connects across 2 different networks (cellular CGNAT, home Wi-Fi, remote cloud VPS, laptop, or backend servers) without open ports or port forwarding.
 - ⚡ **Built-In Client Code Generator**: Generate copy-paste client code snippets in **cURL**, **Python (requests)**, **Node.js (fetch)**, **PHP (cURL)**, and **Go** directly from the in-app Remote Mesh tab.
-- 🔒 **Privacy Focused & Secure**: No third-party data tracking, no ads. Built-in SHA-256 API token authentication and brute-force rate-limiting.
-- 📦 **Batch SMS Support**: Send up to 100 SMS messages in a single API call via `/sms/batch/` with automated rate pacing (100ms) to prevent carrier throttling.
+- 🔒 **Multi-Token Security & Granular Scopes**: Manage multiple named API tokens with permission scopes (`sms:send`, `sms:read`, `admin`) and individual revocation, backed by SHA-256 and brute-force rate-limiting.
+- 📦 **Batch SMS & Tracking**: Send up to 100 SMS messages in a single API call via `/sms/batch/` with automated rate pacing (100ms) to prevent carrier throttling, plus individual status inspection via `/sms/{id}` and `/sms/history/`.
 - 💬 **Smart Telephony & Segmentation**: Automatic phone number sanitization (stripping spaces, brackets, hyphens) and real-time GSM-7 (160 chars) vs UCS-2 (70 chars) multipart SMS segment calculation.
 - 📱 **Wide Device Compatibility**: Supports Android 7.0 (API 24) up to Android 15+ (API 36), with both 64-bit (`arm64-v8a`) and 32-bit (`armeabi-v7a`) ARM architectures.
 - 🧪 **Built-In Test SMS & Live Metrics**: Test carrier signal, permissions, and inspect SMS character encoding and segment metrics in-app.
@@ -61,10 +64,25 @@ curl -i -X POST 'http://<DEVICE_IP>:9292/sms/batch/' \
   }'
 ```
 
-#### Health Check
+#### Health & Telemetry Check
 ```bash
 curl http://<DEVICE_IP>:9292/health/
+curl -H 'Authorization: Bearer your-secret-api-key' http://<DEVICE_IP>:9292/system/stats/
 ```
+
+#### Query Message Delivery Status
+```bash
+curl -H 'Authorization: Bearer your-secret-api-key' http://<DEVICE_IP>:9292/sms/<MESSAGE_ID>
+```
+
+#### Dual-SIM Routing (Optional `sim_slot`)
+```bash
+curl -i -X POST 'http://<DEVICE_IP>:9292/sms/' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer your-secret-api-key' \
+  -d '{"number": "+1234567890", "text": "Dispatching via SIM 2", "sim_slot": 1}'
+```
+
 
 ---
 

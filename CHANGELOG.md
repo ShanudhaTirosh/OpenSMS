@@ -2,6 +2,21 @@
 
 ## Changes
 
+### 0.4.0
+- **In-App GitHub Releases Auto-Updater**: Automatic background update detection against GitHub Releases API with notification banner, manual check option in Settings and Navigation Drawer, chunked APK downloader with progress reporting, and 1-tap Android package installation via native `Intent(ACTION_VIEW)`.
+- **SQLite WAL Message Persistence**: Added robust SQLite database layer operating in Write-Ahead Logging (`WAL`) mode with automatic indexing, message status tracking (`queued`, `sent`, `failed`), retry counters, and concurrent thread safety.
+- **Live Home Metrics Dashboard**: Real-time stats dashlet displaying Sent Today counter, Success Rate percentage, and Queue Depth with immediate UI synchronization.
+- **Telephony & Multi-SIM Engine**: Added multi-SIM detection and routing using Android `SubscriptionManager`, allowing selection between Auto, SIM 1, and SIM 2 via in-app UI and the REST API.
+- **Expanded REST API**:
+  - `GET /sms/{id}`: Query real-time message status, delivery timestamp, and error details.
+  - `GET /sms/history/`: Paginated SMS history with limit, offset, and status filtering.
+  - `GET /system/stats/`: Real-time gateway telemetry, throughput metrics, and uptime.
+  - `GET /system/sims/`: Active cellular subscriptions and carrier identifiers.
+  - `GET /system/update/`: Check for newer OpenSMS GitHub releases via API.
+- **Multi-Token API Security**: Added support for multiple named API keys with granular permission scopes (`sms:send`, `sms:read`, `admin`) and individual revocation while maintaining full backwards compatibility with legacy `keys.json`.
+- **Programmatic Switch Event Guard (BUG-03 Fix)**: Resolved recurring event loops in KivyMD 2.x `MDSwitch` by implementing a reentrant refresh guard across Settings.
+- **Activity Heartbeat Synchronization**: Bidirectional IPC activity timestamps keep the UI gateway hero card responsive to background cellular and API events.
+
 ### 0.3.0
 - **Tailscale Mesh Hub & Cross-Network Integration**: Added dedicated Remote Mesh hub with live Tailscale status detection, Tailscale CGNAT (`100.64.0.0/10`) interface recognition, and remote endpoint discovery.
 - **Multi-Language Client Code Generator**: Built-in 1-tap code generator producing pre-configured connection code for cURL, Python (`requests`), Node.js (`fetch`), PHP (`curl`), and Go (`net/http`).

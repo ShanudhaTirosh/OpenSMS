@@ -361,3 +361,178 @@ def test_tailscale_api_token_connection(monkeypatch):
 
     TailscaleService.disconnect_key()
 
+def test_db_manager_crud_and_metrics(tmp_path):
+    from services.dbMgr import DatabaseManager
+    db_file = str(tmp_path / "test_opensms.db")
+    db = DatabaseManager(db_file)
+
+    msg_id = db.create_message(
+        recipient="+15551234567",
+        text="Test persistence",
+        encoding="GSM-7",
+        segments=1,
+        sim_slot=0,
+        status="queued"
+    )
+    assert msg_id is not None
+    record = db.get_message(msg_id)
+    assert record["recipient"] == "+15551234567"
+    assert record["status"] == "queued"
+
+    db.update_message_status(msg_id, "sent")
+    updated = db.get_message(msg_id)
+    assert updated["status"] == "sent"
+    assert updated["delivered_at"] is not None
+
+    metrics = db.get_metrics()
+    assert metrics["sent_today"] >= 1
+    assert metrics["success_rate"] == 100.0
+
+def test_db_manager_multi_key():
+    from services.dbMgr import DatabaseManager
+    from services.postApi import set_config_path
+    raw_key = "osms_test_key_abc_123456"
+    raw_key2 = "osms_test_key_xyz_789012"
+
+    import services.postApi as post_mod
+    db = post_mod.db_mgr
+
+    id1 = db.add_api_key(raw_key, name="Home Assistant", scopes=["sms:write"])
+    id2 = db.add_api_key(raw_key2, name="Grafana Alerts", scopes=["sms:read"])
+
+    v1 = db.verify_api_key(raw_key)
+    assert v1 is not None
+    assert v1["name"] == "Home Assistant"
+
+    v2 = db.verify_api_key(raw_key2)
+    assert v2 is not None
+    assert v2["name"] == "Grafana Alerts"
+
+    keys = db.list_api_keys()
+    assert len(keys) >= 2
+
+    # Revoke id1
+    db.revoke_api_key(id1)
+    assert db.verify_api_key(raw_key) is None
+    assert db.verify_api_key(raw_key2) is not None
+
+def test_semver_parsing_and_comparison():
+    from services.updateMgr import parse_semver, is_newer_version
+    assert parse_semver("v0.3.0") == (0, 3, 0)
+    assert parse_semver("0.4.1") == (0, 4, 1)
+    assert parse_semver("v1.0.0-rc1") == (1, 0, 0)
+
+    assert is_newer_version("0.3.0", "v0.4.0") is True
+    assert is_newer_version("0.4.0", "v0.4.0") is False
+    assert is_newer_version("0.5.0", "v0.4.0") is False
+    assert is_newer_version("0.3.0", "0.3.1") is True
+
+def test_new_api_endpoints():
+    raw_key = generate_new_api_key("Test App")
+    headers = {"Authorization": f"Bearer {raw_key}"}
+
+    # 1. Send SMS and get ID
+    sms_res = client.post(
+        "/sms/",
+        headers=headers,
+        json={"number": "+1234567890", "text": "Testing new endpoints"}
+    )
+    assert sms_res.status_code == 200
+    msg_id = sms_res.json().get("id")
+    assert msg_id is not None
+
+    # 2. Get SMS status by ID
+    get_res = client.get(f"/sms/{msg_id}", headers=headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["id"] == msg_id
+    assert get_res.json()["status"] == "sent"
+
+    # 3. Get history
+    hist_res = client.get("/sms/history/", headers=headers)
+    assert hist_res.status_code == 200
+    assert hist_res.json()["count"] >= 1
+
+    # 4. Get system stats
+    stats_res = client.get("/system/stats/", headers=headers)
+    assert stats_res.status_code == 200
+    assert "metrics" in stats_res.json()
+
+    # 5. Get system sims
+    sims_res = client.get("/system/sims/", headers=headers)
+    assert sims_res.status_code == 200
+    assert len(sims_res.json()["sims"]) >= 1
+
+def test_update_manager_check_and_download(tmp_path, monkeypatch):
+    from services.updateMgr import UpdateManager
+    import requests
+
+    class MockResponse:
+        def __init__(self, status_code, json_data, content=b""):
+            self.status_code = status_code
+            self._json = json_data
+            self.content = content
+            self.headers = {"content-length": str(len(content))}
+
+        def json(self):
+            return self._json
+
+        def iter_content(self, chunk_size=65536):
+            yield self.content
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.exceptions.HTTPError(f"HTTP {self.status_code}")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    mock_release = {
+        "tag_name": "v0.5.0",
+        "name": "OpenSMS v0.5.0",
+        "body": "Exciting new features and bug fixes!",
+        "html_url": "https://github.com/ShanudhaTirosh/OpenSMS/releases/tag/v0.5.0",
+        "assets": [
+            {
+                "name": "OpenSMS-v0.5.0-release.apk",
+                "browser_download_url": "https://github.com/ShanudhaTirosh/OpenSMS/releases/download/v0.5.0/OpenSMS.apk",
+                "size": 1024
+            }
+        ]
+    }
+
+    def mock_get(url, *args, **kwargs):
+        if "releases/latest" in url:
+            return MockResponse(200, mock_release)
+        elif "download" in url:
+            return MockResponse(200, {}, content=b"PK\x03\x04mock_apk_binary_payload")
+        return MockResponse(404, {})
+
+    monkeypatch.setattr(requests, "get", mock_get)
+
+    # 1. Check for updates
+    res = UpdateManager.check_for_updates("0.4.0")
+    assert res["success"] is True
+    assert res["has_update"] is True
+    assert res["latest_version"] == "0.5.0"
+    assert res["apk_url"] is not None
+
+    # 2. Download APK
+    dest_file = str(tmp_path / "test_update.apk")
+    progress_reported = []
+    def on_prog(pct, dl, tot):
+        progress_reported.append(pct)
+
+    dl_res = UpdateManager.download_apk(res["apk_url"], dest_file, progress_callback=on_prog)
+    assert dl_res["success"] is True
+    assert os.path.exists(dest_file)
+    assert len(progress_reported) > 0
+    assert progress_reported[-1] == 100.0
+
+    # 3. Install simulation (desktop returns success simulation)
+    inst_res = UpdateManager.install_apk(dest_file)
+    assert inst_res["success"] is True
+
+

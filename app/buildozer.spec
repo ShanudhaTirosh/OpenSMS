@@ -134,7 +134,7 @@ icon.adaptive_background.filename = %(source.dir)s/data/images/icon_bg.png
 
 # (list) Permissions
 # (See https://python-for-android.readthedocs.io/en/latest/buildoptions.html for all the supported syntaxes and properties)
-android.permissions = android.permission.INTERNET, android.permission.SEND_SMS, android.permission.WAKE_LOCK, android.permission.FOREGROUND_SERVICE, android.permission.FOREGROUND_SERVICE_DATA_SYNC, android.permission.POST_NOTIFICATIONS
+android.permissions = android.permission.INTERNET, android.permission.SEND_SMS, android.permission.WAKE_LOCK, android.permission.FOREGROUND_SERVICE, android.permission.FOREGROUND_SERVICE_DATA_SYNC, android.permission.POST_NOTIFICATIONS, android.permission.REQUEST_INSTALL_PACKAGES
 
 # (list) features (adds uses-feature -tags to manifest)
 #android.features = android.hardware.usb.host

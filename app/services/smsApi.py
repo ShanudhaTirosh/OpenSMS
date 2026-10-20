@@ -17,9 +17,12 @@ if platform == "android":
     except ImportError:
         autoclass = None
         cast = None
-
+else:
+    autoclass = None
+    cast = None
 
 import re
+from typing import Optional, List, Dict, Any
 
 ## functions
 
@@ -77,57 +80,133 @@ def calculate_sms_segments(text: str) -> dict:
         "remaining": remaining
     }
 
-def get_sms_manager():
-    """Retrieve SmsManager instance compatible across Android versions."""
-    SmsManager = autoclass('android.telephony.SmsManager')
+def get_android_context():
+    """Retrieve active Android Context (Activity or Background Service)."""
+    if platform != "android" or not autoclass:
+        return None
     try:
-        Context = autoclass('android.content.Context')
-        context = None
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        if PythonActivity.mActivity is not None:
+            return PythonActivity.mActivity
+    except Exception:
+        pass
+
+    try:
+        PythonService = autoclass('org.kivy.android.PythonService')
+        if PythonService.mService is not None:
+            return PythonService.mService
+    except Exception:
+        pass
+    return None
+
+def get_active_sims() -> List[Dict[str, Any]]:
+    """Enumerate active SIM cards via Android SubscriptionManager (API 22+)."""
+    sims = []
+    if platform == "android" and autoclass:
         try:
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            context = PythonActivity.mActivity
-        except Exception:
-            pass
+            Context = autoclass('android.content.Context')
+            context = get_android_context()
+            if context:
+                sub_service = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE)
+                if sub_service:
+                    active_subs = sub_service.getActiveSubscriptionInfoList()
+                    if active_subs:
+                        for i in range(active_subs.size()):
+                            sub = active_subs.get(i)
+                            slot_idx = sub.getSimSlotIndex()
+                            sub_id = sub.getSubscriptionId()
+                            carrier = str(sub.getCarrierName() or f"SIM {slot_idx + 1}")
+                            display_name = str(sub.getDisplayName() or carrier)
+                            country = str(sub.getCountryIso() or "").upper()
+                            sims.append({
+                                "slot": slot_idx,
+                                "sub_id": sub_id,
+                                "carrier": carrier,
+                                "display_name": display_name,
+                                "country": country
+                            })
+        except Exception as e:
+            print("Notice: SubscriptionManager SIM query skipped:", e)
+    if not sims:
+        # Fallback default SIM entry
+        sims.append({
+            "slot": 0,
+            "sub_id": 0,
+            "carrier": "Default Carrier (Primary)",
+            "display_name": "SIM 1 (Default)",
+            "country": "LOCAL"
+        })
+    return sims
 
-        if not context:
-            try:
-                PythonService = autoclass('org.kivy.android.PythonService')
-                context = PythonService.mService
-            except Exception:
-                pass
+def get_sms_manager(sim_slot: int = -1):
+    """
+    Retrieve SmsManager instance compatible across Android versions,
+    with automatic multi-SIM routing when sim_slot (0 or 1) is specified.
+    """
+    if platform != "android" or not autoclass:
+        return None
 
-        # For Android 12+ (API 31+)
-        if context is not None:
+    SmsManager = autoclass('android.telephony.SmsManager')
+    context = get_android_context()
+
+    # Multi-SIM routing (API 22+)
+    if sim_slot >= 0 and context:
+        try:
+            Context = autoclass('android.content.Context')
+            sub_service = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE)
+            if sub_service:
+                active_subs = sub_service.getActiveSubscriptionInfoList()
+                if active_subs:
+                    for i in range(active_subs.size()):
+                        sub = active_subs.get(i)
+                        if sub.getSimSlotIndex() == sim_slot:
+                            sub_id = sub.getSubscriptionId()
+                            return SmsManager.getSmsManagerForSubscriptionId(sub_id)
+        except Exception as e:
+            print(f"Notice: Specific SIM routing for slot {sim_slot} failed, falling back to default:", e)
+
+    # Android 12+ (API 31+) Context service retrieval
+    if context is not None:
+        try:
+            Context = autoclass('android.content.Context')
             raw_manager = context.getSystemService(Context.TELEPHONY_SMS_SERVICE)
             if raw_manager is not None:
                 if cast is not None:
                     return cast('android.telephony.SmsManager', raw_manager)
                 return raw_manager
-    except Exception as e:
-        print("Notice: getSystemService for SmsManager failed, falling back to getDefault():", e)
+        except Exception as e:
+            print("Notice: getSystemService for SmsManager failed:", e)
+
     return SmsManager.getDefault()
 
-def send_sms(phone: str, msg: str):
-    stat = False
+def send_sms(phone: str, msg: str, sim_slot: int = -1, msg_id: Optional[str] = None) -> bool:
+    """
+    Send an SMS message via Android SmsManager or desktop simulation.
+    Handles phone sanitization, multi-part segmentation, and SIM slot routing.
+    """
     clean_phone = sanitize_phone_number(phone)
     if not clean_phone:
         print(f"SMS ❌ Failed: invalid or empty phone number '{phone}'")
         return False
 
-    if platform == "android":
+    if platform == "android" and autoclass:
         try:
-            sms_manager = get_sms_manager()
+            sms_manager = get_sms_manager(sim_slot=sim_slot)
+            if not sms_manager:
+                print("SMS ❌ Failed: SmsManager not initialized")
+                return False
+
             parts = sms_manager.divideMessage(msg)
             if parts.size() > 1:
                 sms_manager.sendMultipartTextMessage(clean_phone, None, parts, None, None)
             else:
                 sms_manager.sendTextMessage(clean_phone, None, msg, None, None)
-            stat = True
+            return True
         except Exception as e:
-            print("SMS ❌ Failed:", e)
+            print(f"SMS ❌ Failed to {clean_phone}: {e}")
+            return False
     else:
-        # Non-android simulation
-        print(f"[Simulation] SMS to {clean_phone}: {msg}")
-        stat = True
-    return stat
-
+        # Non-android desktop simulation
+        slot_info = f" [SIM {sim_slot + 1}]" if sim_slot >= 0 else ""
+        print(f"[Simulation]{slot_info} SMS to {clean_phone}: {msg}")
+        return True
