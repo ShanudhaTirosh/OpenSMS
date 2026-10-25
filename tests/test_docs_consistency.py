@@ -13,13 +13,13 @@ def test_openapi_json_matches_the_running_app():
 
 
 def test_llms_txt_copies_are_identical():
-    assert (ROOT / "llms.txt").read_text() == (DOCS / "llms.txt").read_text()
+    assert (ROOT / "llms.txt").read_text(encoding="utf-8") == (DOCS / "llms.txt").read_text(encoding="utf-8")
 
 
 def test_documented_statuses_exist_in_the_code():
     from services.uiFormat import STATUS_STYLE
     known = set(STATUS_STYLE)
-    ref = (DOCS / "api-reference.md").read_text()
+    ref = (DOCS / "api-reference.md").read_text(encoding="utf-8")
     section = ref[ref.index("## Message lifecycle"):]
     documented = set(re.findall(r"^\| `([a-z]+)` \|", section, re.M)) - {"status"}   # "status" is the table header
     assert documented == known

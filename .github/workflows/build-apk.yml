@@ -76,8 +76,12 @@ jobs:
           pip install -r app/req_android.txt -c app/constraints.txt
 
       - name: Run automated test suite
+        env:
+          KIVY_NO_ARGS: '1'
+          KIVY_WINDOW: 'mock'
+          KIVY_NO_CONSOLELOG: '1'
         run: |
-          pytest tests/ -v
+          python -m pytest tests -v
 
       - name: Prepare and patch python-for-android
         run: |

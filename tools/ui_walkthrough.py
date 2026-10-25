@@ -12,7 +12,11 @@ Run from the app/ directory. Screenshots go to OUT below. Needs a GL-capable (so
 xvfb and libgl1-mesa-dri.
 """
 import os, sys, time, json
-os.environ.update(KIVY_NO_ARGS="1", HOME="/tmp/hh", XDG_DATA_HOME="/tmp/hh", OPENSMS_ALLOW_SIMULATION="1")
+home = os.environ.get("HOME") or "/tmp/hh"
+os.makedirs(home, exist_ok=True)
+os.environ.setdefault("HOME", home)
+os.environ.setdefault("XDG_DATA_HOME", home)
+os.environ.update(KIVY_NO_ARGS="1", OPENSMS_ALLOW_SIMULATION="1")
 sys.path.insert(0, ".")
 from kivy.config import Config
 Config.set("graphics", "width", "412"); Config.set("graphics", "height", "860")
