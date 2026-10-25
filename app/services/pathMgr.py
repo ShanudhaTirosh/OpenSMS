@@ -36,7 +36,9 @@ def get_user_data_dir(app_name: str) -> Path:
 def atomic_write_json(file_path: str, data: dict):
     """Write data to temporary file and atomically replace to avoid corrupt reads."""
     import json
-    tmp_path = str(file_path) + ".tmp"
+    import threading
+    # Unique temp name per process/thread: several threads may write the same file at once (audit ARCH-01)
+    tmp_path = f"{file_path}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as tf:
             json.dump(data, tf, indent=2)
@@ -45,6 +47,10 @@ def atomic_write_json(file_path: str, data: dict):
         os.replace(tmp_path, str(file_path))
     except Exception as e:
         print(f"Error atomic writing {file_path}: {e}")
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 def is_tailscale_ip(ip: str) -> bool:
     """Check if an IPv4 address belongs to Tailscale CGNAT range (100.64.0.0/10)."""
@@ -91,7 +97,11 @@ def get_network_interfaces_info() -> dict:
                     if ":" not in ip_str and not ip_str.startswith("127."):
                         if ip_str not in seen_ips:
                             seen_ips.add(ip_str)
-                            is_ts = is_tailscale_ip(ip_str) or "tailscale" in iface_name
+                            # 100.64.0.0/10 is also used for carrier-grade NAT: an address in that range on a
+                            # cellular/Wi-Fi/Ethernet interface is NOT Tailscale (audit TS-04).
+                            non_tunnel = any(iface_name.startswith(k) for k in
+                                             ("rmnet", "ccmni", "pdp", "wwan", "wlan", "wifi", "eth", "en", "lo"))
+                            is_ts = "tailscale" in iface_name or (is_tailscale_ip(ip_str) and not non_tunnel)
                             iface_type = "tailscale" if is_ts else (
                                 "wifi" if any(k in iface_name for k in ["wlan", "wl", "wifi"]) else (
                                 "cellular" if any(k in iface_name for k in ["rmnet", "ccmni", "pdp", "wwan"]) else (
@@ -178,6 +188,43 @@ def get_network_interfaces_info() -> dict:
 
     info["all_ips"] = ordered_ips
     return info
+
+def get_vpn_networks():
+    """
+    Networks the OS marks as VPN, as [{"interface": str, "addresses": [str]}].
+    Returns None when this cannot be determined (not Android, permission missing, API error) so
+    callers never mistake "could not ask" for "no VPN". Needs ACCESS_NETWORK_STATE on Android.
+    NOTE: device-untested (see docs/device-test-plan.md).
+    """
+    try:
+        from jnius import autoclass
+    except Exception:
+        return None
+    try:
+        from services.smsApi import get_android_context
+        context = get_android_context()
+        if context is None:
+            return None
+        Context = autoclass("android.content.Context")
+        NetworkCapabilities = autoclass("android.net.NetworkCapabilities")
+        cm = context.getSystemService(Context.CONNECTIVITY_SERVICE)
+        result = []
+        networks = cm.getAllNetworks()
+        for net in networks:
+            caps = cm.getNetworkCapabilities(net)
+            if caps is None or not caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN):
+                continue
+            lp = cm.getLinkProperties(net)
+            addrs = []
+            if lp is not None:
+                links = lp.getLinkAddresses()
+                for i in range(links.size()):
+                    addrs.append(str(links.get(i).getAddress().getHostAddress()))
+            result.append({"interface": str(lp.getInterfaceName()) if lp is not None else "", "addresses": addrs})
+        return result
+    except Exception as e:
+        print(f"Notice: VPN network query unavailable: {e}")
+        return None
 
 def get_device_ip_addresses() -> list[str]:
     """Helper to discover all active IP addresses, prioritizing Tailscale and LAN."""

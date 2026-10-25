@@ -213,6 +213,18 @@ Builder.load_string('''
                         track_color_active: "green"
                         on_active: app.toggle_wakelock_setting(self, self.active)
 
+                # Battery optimisation (keeps the gateway alive while the screen is off)
+                MDListItem:
+                    on_release: app.open_battery_settings()
+                    MDListItemLeadingIcon:
+                        icon: "battery-heart-variant"
+                    MDListItemHeadlineText:
+                        text: "Keep running in background"
+                    MDListItemSupportingText:
+                        text: "Open battery settings and set OpenSMS to Unrestricted / Don't optimise"
+                    MDListItemTrailingIcon:
+                        icon: "open-in-new"
+
                 # Dark Mode
                 MDListItem:
                     MDListItemLeadingIcon:

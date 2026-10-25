@@ -24,10 +24,10 @@ OpenSMS converts any Android smartphone or tablet (running Android 7.0 / API 24 
 
 Key Components:
 - Background Gateway Server: FastAPI application powered by Uvicorn running inside a Python service on Android.
-- SQLite WAL Persistence: High-throughput local relational store operating in Write-Ahead Logging mode (`PRAGMA journal_mode = WAL`) with busy timeouts. Keeps message history, delivery statuses (`queued`, `sending`, `sent`, `failed`), multi-key token registry, and telemetry metrics.
+- SQLite WAL Persistence: High-throughput local relational store operating in Write-Ahead Logging mode (`PRAGMA journal_mode = WAL`) with busy timeouts. Keeps message history, delivery statuses (`queued`, `submitted`, `sent`, `delivered`, `failed`, `unknown`), multi-key token registry, and telemetry metrics.
 - Telephony Orchestration Engine: Built via PyJNIus interacting directly with native Android `SmsManager` and `SubscriptionManager`. Handles GSM-7 vs UCS-2 character classification, multipart segmentation, and dual-SIM routing.
-- WireGuard Mesh Integration: Live auto-detection of Tailscale CGNAT IP addresses (`100.64.0.0/10`), providing zero-config connectivity between cloud VPS, local machines, and Android devices across different networks.
-- Auto-Updater Subsystem: Queries GitHub Releases API, downloads release APKs in streamed chunks with progress tracking, and invokes the Android Package Installer via `Intent(ACTION_VIEW)` and `FileProvider`.
+- Tailscale awareness: OpenSMS observes the phone's Tailscale address (a VPN network carrying `100.64.0.0/10` or `fd7a:115c:a1e0::/48`) from the official Tailscale app and shows status and diagnostics. It does not join the tailnet itself and stores no Tailscale credential. An API listening mode (all networks / Tailscale only / this phone) can restrict who can connect.
+- Auto-Updater Subsystem: Queries the configured repository's GitHub Releases, accepts only release-asset URLs of that repository, verifies the published SHA-256 when available, then tries to open the Android Package Installer (falling back to opening the release page in the browser).
 
 Default Configuration:
 - Port: 9292 (configurable from 1025 to 65535)
@@ -39,7 +39,7 @@ Default Configuration:
 - In-App GitHub Releases Auto-Updater: Detects newer releases on app launch, displays an animated notification banner on Home screen, and supports 1-tap in-app APK download and install.
 - SQLite Message Store & Metrics: Replaced ephemeral in-memory state with SQLite WAL persistence. Tracks delivery receipts, carrier errors, sent today count, success rate %, and queue depth.
 - Dual-SIM Telephony Routing: Multi-SIM autodetection via Android `SubscriptionManager`. Allows carrier slot selection in Settings (Auto, SIM 1, SIM 2) and programmatic routing via `sim_slot` in the REST API.
-- Multi-Token API Security: Allows multiple named API keys with granular scopes (`sms:send`, `sms:read`, `admin`) and individual revocation while maintaining backwards compatibility with `keys.json`.
+- Multi-Token API Security: Allows multiple named API keys with enforced scopes (`sms:write`, `sms:read`, `admin`) and individual revocation (`DELETE /keys/{id}` with an `admin` key, or the API tab in the app).
 - Expanded REST API: Added `GET /sms/{id}`, `GET /sms/history/`, `GET /system/stats/`, `GET /system/sims/`, and `GET /system/update/`.
 - UI/UX & Bug Fixes: Guarded settings switches against KivyMD 2.x event loops (BUG-03 fix) and added background-to-foreground IPC activity heartbeats.
 
@@ -48,7 +48,7 @@ Default Configuration:
 ================================================================================
 OpenSMS binds to all network interfaces on the device:
 1. Local Wi-Fi / LAN: Accessible at `http://192.168.x.x:9292` by other machines on the same local router.
-2. Tailscale WireGuard Mesh (Recommended): Accessible at `http://100.x.y.z:9292` from any machine in the same Tailnet, bypassing cellular CGNAT and firewall restrictions without port forwarding.
+2. Tailscale (Recommended): With the Tailscale app connected on the phone, accessible at `http://100.x.y.z:9292` from any device in the same tailnet, without port forwarding.
 3. Reverse SSH Tunnel: Using Termux on Android: `ssh -N -R 9292:localhost:9292 user@vps.com`.
 4. Cloudflare Tunnel / Ngrok: Accessible via public HTTPS URL if exposed through a tunnel agent.
 
@@ -59,7 +59,7 @@ OpenSMS binds to all network interfaces on the device:
     Authorization: Bearer <API_KEY>
 - Token format: High-entropy string generated with `secrets.token_urlsafe(32)` prefixed with `osms_`.
 - Storage: Tokens are hashed with SHA-256 before insertion into SQLite. Plaintext tokens are wiped from RAM after generation.
-- Rate Limiting: 5 failed authentication attempts per IP within a 60-second sliding window triggers an HTTP 429 response.
+- Rate Limiting: 10 failed authentication attempts per client address within a 60-second window trigger an HTTP 429 response; each key may send at most 300 messages per minute.
 
 ================================================================================
 5. COMPLETE REST API SPECIFICATIONS
@@ -93,7 +93,7 @@ Request Body:
 
 Response (200 OK):
 {
-  "id": "msg_9f3b81ca7d2e4018",
+  "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
   "number": "+1234567890",
   "stat": true,
   "sim_slot": 0,
@@ -105,7 +105,7 @@ Errors:
 - 400 Bad Request: Number format invalid or text empty.
 - 401 Unauthorized: Invalid or missing API key.
 - 429 Too Many Requests: Rate limit exceeded.
-- 500 Internal Server Error: Cellular modem error.
+- 502 Bad Gateway (`delivery_failed`): the hand-off to the telephony layer failed (see `detail`).
 
 --------------------------------------------------------------------------------
 5.3. Send Batch SMS
@@ -142,15 +142,15 @@ Authentication: Bearer <API_KEY>
 
 Response (200 OK):
 {
-  "id": "msg_9f3b81ca7d2e4018",
+  "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
   "recipient": "+1234567890",
   "text": "Hello from OpenSMS!",
   "encoding": "GSM-7",
   "segments": 1,
   "sim_slot": 0,
-  "status": "sent", // "queued" | "sending" | "sent" | "failed"
+  "status": "sent", // "queued" | "submitted" | "sent" | "delivered" | "failed" | "unknown"
   "created_at": 1729432800.12,
-  "delivered_at": 1729432801.45,
+  "delivered_at": null,
   "carrier_error": null
 }
 
@@ -167,7 +167,7 @@ Response (200 OK):
   "limit": 50,
   "messages": [
     {
-      "id": "msg_9f3b81ca7d2e4018",
+      "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
       "recipient": "+1234567890",
       "text": "Hello from OpenSMS!",
       "status": "sent",
@@ -175,7 +175,7 @@ Response (200 OK):
       "segments": 1,
       "sim_slot": 0,
       "created_at": 1729432800.12,
-      "delivered_at": 1729432801.45
+      "delivered_at": null
     }
   ]
 }
@@ -475,7 +475,8 @@ Model Context Protocol (MCP) Tool Declaration:
 ================================================================================
 - 400 Bad Request: Number must contain between 7 and 15 digits. Text cannot be empty or only whitespace.
 - 401 Unauthorized: The Bearer token provided does not match any registered key or has been revoked.
-- 429 Too Many Requests: More than 5 failed authentication requests occurred from the caller's IP in the last 60 seconds.
-- 500 Internal Server Error: The cellular modem failed to transmit. Check cellular reception, carrier balance/allowance, and SIM card status.
+- 429 Too Many Requests: More than 10 failed authentication requests from the caller's address in the last 60 seconds, or the per-key send limit was exceeded (see `Retry-After`).
+- 502 Bad Gateway: The hand-off to the telephony layer failed. Check cellular reception, carrier balance/allowance and SIM status.
+- 503 Service Unavailable: The send queue is full; retry after `Retry-After`.
 - Battery Sleeping / Disconnect: Ensure OpenSMS battery optimization is set to "Unrestricted" in Android settings.
 - Android 13+ SMS Permission: Enable "Allow restricted settings" in Android App Info if permissions are greyed out.

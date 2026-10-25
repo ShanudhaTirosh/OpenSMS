@@ -54,13 +54,13 @@ To ensure Android doesn't kill OpenSMS in the background:
 
 When your phone is on cellular mobile data or behind home Wi-Fi (CGNAT), and your application server runs on a cloud VPS (AWS, GCP, DigitalOcean) or a developer laptop, use one of the following methods:
 
-### Method A: Tailscale WireGuard Mesh (Recommended & Zero-Config)
+### Method A: Tailscale (Recommended)
 1. Install **Tailscale** on your Android phone from Google Play Store or F-Droid.
 2. Install **Tailscale** on your remote server or laptop.
 3. Log in with the same account on both devices.
 4. In OpenSMS, tap the **Mesh** tab.
-5. OpenSMS detects the live `100.x.y.z` Tailscale IP and displays a green **Tailscale Connected** pill!
-6. You can now send API requests directly to `http://100.x.y.z:9292/sms/` from anywhere in the world!
+5. OpenSMS reads the phone's `100.x.y.z` Tailscale address from the system and shows **Tailscale: connected**. It does not connect Tailscale for you and never asks for a Tailscale key.
+6. Send API requests to `http://100.x.y.z:9292/sms/` from any device on the same tailnet. Choose *Tailscale only* under *API listening mode* to keep the API off Wi-Fi/LAN. See [tailscale.md](tailscale.md) for states and troubleshooting.
 
 ### Method B: Reverse SSH Tunnel
 Run an SSH reverse tunnel from Termux on your phone to your remote VPS:
@@ -92,7 +92,7 @@ curl -i -X POST 'http://<DEVICE_IP>:9292/sms/' \
 Response:
 ```json
 {
-  "id": "msg_9f3b81ca7d2e4018",
+  "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
   "number": "+1234567890",
   "stat": true,
   "sim_slot": 0,

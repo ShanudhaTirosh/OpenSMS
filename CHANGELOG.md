@@ -2,6 +2,75 @@
 
 ## Changes
 
+### Unreleased (System & diagnostics)
+- **System & diagnostics screen** (menu drawer): shows whether the background service is alive (with a heartbeat age), the API server state and listening address, queue size, wake lock, SMS and Phone permissions, whether delivery tracking is active, SIM detection, Tailscale state, storage and app facts, each with a plain-language hint when something is wrong. **Copy report** copies a text report that never contains keys, phone numbers or message text.
+- **Maintenance**: clear finished messages older than 30 days, or all finished messages (with confirmation). Messages that are still being sent and API keys are never touched.
+- **Fix**: SMS receipts are now registered only in the service process (the app and the service both registered the receiver, so every receipt would have been processed twice).
+
+### Unreleased (updater)
+- **In-app update install now uses Android's `PackageInstaller`** (the app streams the APK to the system, no `FileProvider` needed), with the previous install intent and the release page as fallbacks. A conflict (typically a differently signed APK) is explained with its remedy. New Java classes in `app/java_src` (`InstallResultReceiver`, `InstallResultListener`). Device-untested.
+
+### Unreleased (background operation)
+- **The gateway keeps running when you close the app** and stops only when you press Stop Server. The service is now sticky (restarted by Android if killed) and no longer stops when the app task is removed.
+- **Service type changed from `dataSync` to `specialUse`**: on Android 15+ a `dataSync` service is limited to 6 hours per 24 h and the app crashes when the timeout fires. New permission `FOREGROUND_SERVICE_SPECIAL_USE` replaces `FOREGROUND_SERVICE_DATA_SYNC`.
+- **Reopening the app no longer stops the server**: the last choice (running / stopped) is restored, and a running service's status is kept (it used to be deleted and a "stop" request written at every launch).
+- The CPU wake lock is now held by the service (it used to die with the app). New **Keep running in background** shortcut in Settings opens Android's battery settings.
+- The service writes a heartbeat so the app can tell a live service from a stale status file. In-app sending says so when the service is not running.
+- CI: the debug signing key is cached so test builds install over each other.
+
+### Unreleased (audit Stage 6 completion: in-app sending)
+- **New message** (Messages tab, top-right button): write a number and text with a live segment counter, inline validation, a review/confirm step and a double-tap guard. The message is handed to the gateway service through an outbox, so it appears in the history with its real status and receipts. The Home "Test SMS" dialog now uses the same path (it used to bypass the message table).
+- Crash-safe: the file name is the message id and the service ignores ids it already knows, so a crash can never send a message twice; malformed items are set aside as `*.bad`; a full queue just delays the message.
+
+### Unreleased (audit Stages 7-8: build, release, docs)
+- **Battery / IPC**: the service no longer parses `request.json` five times a second. It reads the file only when it changed and polls once a second after 10 s without commands (a command after a long idle is picked up within about a second). Atomic file writes use a unique temp name per thread, so concurrent writers can no longer collide.
+- **Release pipeline**: new `ci.yml` (ruff, tests on Python 3.11/3.12 with pinned deps, `pip-audit`, headless UI smoke test). `release.yml` now requires a validated `vX.Y.Z` tag equal to `app/app_version.py`, **signs** the APK from repository secrets (fails instead of publishing a debug-signed release; a manual opt-in publishes a debug-signed *pre*-release), publishes `.sha256` files, and no longer interpolates workflow inputs into shell. python-for-android and KivyMD are pinned by commit.
+- **Pinned, audited dependencies**: `fastapi 0.162.0`, `starlette 1.9.0` (fixes known advisories in the previous `0.48`), `uvicorn 0.34.3`, `pydantic 2.12.3` (matches the local pydantic-core recipe), etc. in `requirements-core.txt`, `constraints.txt` and `buildozer.spec` (a test keeps them in sync). `requests` is now declared.
+- **Updater**: only accepts release-asset URLs of the configured repository (`UPDATE_REPO` in `app/app_version.py`), verifies the published SHA-256, and tells you when no checksum was available. If the installer cannot be opened it opens the release page.
+- **SIM routing**: the app now requests `READ_PHONE_STATE`; `GET /system/sims/` reports `reliable`; `sim_slot` requests are refused with an explanation when Android cannot be asked instead of silently using the default SIM.
+- Single version source `app/app_version.py`; removed the unused `services/postFlask.py`; `docs/openapi.json` is generated from the app (`tools/gen_openapi.py`) and a test fails if it is stale; corrected stale documentation claims; added `docs/security.md`, `docs/deployment.md`, troubleshooting table and `.env.example`.
+
+### Unreleased (audit Stage 6: UI/UX)
+- **Messages tab** (new): searchable, filterable (queued / submitted / sent / delivered / failed / unknown), paginated history with colour-coded status chips, a detail dialog (what the status means, failure reason, per-part progress, SIM, provider, id), loading skeletons, empty and error states, and auto-refresh every 5 s while open.
+- **API tab** (new): list keys (name, prefix, permissions, created, last used, active/revoked), create a key with Send/Read/Admin permissions (inline validation, double-submit guard, key shown once with an explicit Copy button) and revoke with confirmation. This is the in-app way to revoke keys.
+- Bottom navigation is now SMS / Messages / API / Mesh / Settings (Logs stays in the menu drawer).
+- Shared components (`StatusChip`, `EmptyState`, `SkeletonRow`) and a Kivy-free presentation layer (`services/uiFormat.py`) with unit tests.
+- Not changed in this stage: the SMS (home) screen, Settings, Logs; see IMPLEMENTATION_PLAN.md for what remains.
+
+### Unreleased (audit Stage 5: Tailscale)
+- **Removed the fake in-app "connect"**: typing a `100.x` address or pasting a key used to show "Connected" with no tunnel. OpenSMS now only *observes* the Tailscale app (see `docs/tailscale.md`) and never stores or asks for a Tailscale key; keys/IPs stored by older versions are deleted on first start.
+- **Honest status** (connected / other VPN / not connected / unavailable) from the OS's VPN networks, with diagnostics. Carrier-grade-NAT addresses in `100.64.0.0/10` on cellular/Wi-Fi interfaces are no longer mistaken for Tailscale. IPv6 tailnet addresses recognised.
+- **API listening mode** (Mesh screen): *All networks* (default, unchanged), *Tailscale only* (fails closed, never falls back), *This phone*. The server retries a blocked Tailscale-only start every 10 s.
+- **Fix**: a failed server bind (port in use, address unavailable) was silent and the UI kept showing "started"; it now reports the error.
+- Mesh screen: explicit "Tailscale app" launcher intent, PHP snippet chip, buttons/chips wrap on narrow phones, snippets no longer contain any API key.
+- New permission `ACCESS_NETWORK_STATE` (normal, no prompt). Device testing required: `docs/device-test-plan.md` section 4.
+
+### Unreleased (audit Stage 4: SMS reliability)
+- **Honest message lifecycle**: `queued` -> `submitted` (handed to Android) -> `sent` (radio accepted every part) -> `delivered` (status report confirmed every part) / `failed` / `unknown` (no result ever arrived). `delivered` is only ever set from a real delivery report; many carriers never send one, in which case the message correctly stays `sent`. Android sent/delivery results are captured per message part (new `parts` array on `GET /sms/{id}`).
+- **Send queue**: sends run on a background worker (bounded queue of 1000, 100 ms pacing) instead of blocking the API event loop. `POST /sms/` still waits for the hand-off and answers as before; if the worker is busy for more than `OPENSMS_SUBMIT_WAIT_SECONDS` (default 15) it returns `202` with `status: queued`. A full queue returns `503 queue_full` (+`Retry-After`). Queued messages are re-queued after a restart; messages whose outcome is ambiguous are marked `unknown` and never re-sent.
+- **SIM validation**: an inactive `sim_slot` now returns `422 invalid_sim_slot` instead of silently using the default SIM.
+- **Accurate segment estimates**: GSM-7 extension characters (EUR, `[`, `]`, `{`, `}`, `\\`, `^`, `~`, `|`) cost 2 septets, emoji cost 2 UTF-16 units, characters are never split across segments; the backtick is correctly treated as non-GSM.
+- **Simulation is opt-in**: outside Android nothing is "sent" unless `OPENSMS_ALLOW_SIMULATION=1`, and such messages carry `provider: simulated`.
+- Database schema v2 (additive): `message_parts` table, `messages.provider`, `messages.parts_expected`.
+- **Device testing required**: the Android receipt code (`app/java_src`, `smsReceipts.py`) is built via `android.add_src` and is verified only by unit tests against a mock provider and a stub compile. See `docs/device-test-plan.md`.
+
+### Unreleased (audit Stage 3: API architecture)
+- **Idempotency**: send `Idempotency-Key: <1-128 chars>` on `POST /sms/` and `POST /sms/batch/`. A retry with the same key returns the original response (header `Idempotent-Replay: true`) and never sends another SMS or uses rate-limit quota. Same key + different body -> `422 idempotency_key_reuse`; still running -> `409 request_in_progress`; a failed send releases the key so it can be retried. Keys are per API key and kept 24 h. Requests without the header behave exactly as before.
+- **Unified error envelope** (additive): every error keeps the legacy `detail` field and adds `error: {code, message}` (e.g. `unauthorized`, `insufficient_scope`, `validation_error`, `send_rate_limited`, `not_found`).
+- **Pagination**: `GET /sms/history` now returns `total` and `has_more` (and a stable sort order).
+- **Schema migrations**: database versioned with `PRAGMA user_version` (now v1, adds the `idempotency` table; existing tables/rows untouched). A database written by a newer app version is refused rather than modified.
+
+### Unreleased (security & correctness audit, Stage 2)
+- **Scopes are now enforced** (`sms:write` send, `sms:read` history/stats/update, `admin` keys/control). Keys created by the app carry `sms:write`+`sms:read`, so existing clients are unaffected.
+- **Key lifecycle**: SQLite is the single source of truth. Legacy `keys.json` is imported once and renamed to `keys.json.migrated` (previously a revoked key kept working through it). New admin-only endpoints: `GET/POST /keys/`, `DELETE /keys/{id}`. Generating a key does **not** revoke others; the dialog text now says so.
+- **Rate limiting**: failed-auth lockout uses the socket address only (`X-Forwarded-For` is ignored); new per-key send limit (`OPENSMS_SEND_RATE_PER_MIN`, default 300, `0` disables) returning `429` + `Retry-After`.
+- **Honest delivery reporting**: `sent` means handed to Android's telephony layer; `delivered_at` is only set for a real `delivered` status. Send responses add `delivery_confirmed: false`; the message text no longer says "sent successfully". (Delivery receipts arrive in a later stage.)
+- `/docs`, `/openapi.json`, `/llms.txt`, `/docs/markdown` require auth unless `OPENSMS_PUBLIC_DOCS=1`.
+- `GET /sms/history` works with or without trailing slash; SMS text limited to 1600 chars; search treats `%`/`_` literally; "sent today" uses local midnight.
+- SQLite connections are always closed; nothing is created at import time; phone numbers are masked in logs; one log-writer thread.
+- Tailscale credentials are no longer stored or shown (older stored keys are scrubbed on start); API keys are no longer auto-copied to the clipboard; Android auto-backup disabled; `requests` added to requirements.
+
+
 ### 0.4.0
 - **In-App GitHub Releases Auto-Updater**: Automatic background update detection against GitHub Releases API with notification banner, manual check option in Settings and Navigation Drawer, chunked APK downloader with progress reporting, and 1-tap Android package installation via native `Intent(ACTION_VIEW)`.
 - **SQLite WAL Message Persistence**: Added robust SQLite database layer operating in Write-Ahead Logging (`WAL`) mode with automatic indexing, message status tracking (`queued`, `sent`, `failed`), retry counters, and concurrent thread safety.

@@ -45,7 +45,8 @@ from services.updateMgr import UpdateManager
 # import services
 from services.postApi import get_api_keys, set_config_path, generate_new_api_key
 from services.pathMgr import atomic_write_json, get_device_ip_addresses, get_network_interfaces_info
-from services.tailscaleSvc import TailscaleService
+from services.tailscaleSvc import TailscaleService, BIND_ALL, BIND_MODES, normalize_bind_mode
+from services.lifecycle import initial_request, resp_is_fresh
 
 # IMPORTANT: Set this property for keyboard behavior
 Window.softinput_mode = "below_target"
@@ -84,7 +85,7 @@ class MainScreenBox(MDBoxLayout):
                 self.bottom_pad = dp(42)
 
 ## Global definitions
-__version__ = "0.4.0" # App version
+from app_version import __version__  # single source: app/app_version.py
 
 
 # Determine the base path for your application's resources
@@ -106,7 +107,7 @@ class OpenSmsApp(MDApp):
         Window.bind(on_keyboard=self.events)
         self.txt_dialog = None
         self.test_dialog = None
-        self.wake_lock = None
+        self._stop_service_when_stopped = False
         self.api_started = False
         self.key_exists = False
         self.api_key = None
@@ -122,11 +123,14 @@ class OpenSmsApp(MDApp):
             "theme": "Light",
             "auto_update": True,
             "sim_slot": -1,
+            "bind_mode": BIND_ALL,
+            "server_desired": "stop",
             "tailscale": {}
         }
         self.req_template = {
             "port": 9292,
             "server": "stop",
+            "bind": BIND_ALL,
         }
 
     def build(self):
@@ -155,7 +159,8 @@ class OpenSmsApp(MDApp):
                 print(f"Could not check android SDK version: {e}")
 
             # Guard permission requests for older android versions (API < 33 has no POST_NOTIFICATIONS)
-            self.android_permissions = [Permission.WAKE_LOCK, Permission.SEND_SMS]
+            # READ_PHONE_STATE is needed to list SIM cards and to route a message by SIM slot
+            self.android_permissions = [Permission.WAKE_LOCK, Permission.SEND_SMS, Permission.READ_PHONE_STATE]
             if sdk_version >= 33:
                 try:
                     self.android_permissions.append(Permission.POST_NOTIFICATIONS)
@@ -168,13 +173,9 @@ class OpenSmsApp(MDApp):
             os.makedirs(self.config_dir, exist_ok=True)
             self.request_path = os.path.join(self.config_dir, "request.json")
             self.resp_path = os.path.join(self.config_dir, "resp.json")
-            if os.path.exists(self.resp_path):
-                try:
-                    os.remove(self.resp_path)
-                except Exception:
-                    pass
-            self.write_request()
-            # start the listener service on Android
+            # NOTE: resp.json is kept (a running service keeps writing it) and the request file is written once
+            # the saved settings are loaded, so reopening the app never changes the gateway's state.
+            # start the listener service on Android (a no-op if it is already running)
             try:
                 self.start_service()
             except Exception as e:
@@ -186,17 +187,17 @@ class OpenSmsApp(MDApp):
             os.makedirs(self.config_dir, exist_ok=True)
             self.request_path = os.path.join(self.config_dir, "request.json")
             self.resp_path = os.path.join(self.config_dir, "resp.json")
-            self.write_request()
             Thread(target=app_service_thread, daemon=True).start()
 
         # All generic setups
-        set_config_path(self.config_dir)
+        set_config_path(self.config_dir, register_receipts=False)   # the service process owns SMS receipts
         self.app_config = os.path.join(self.config_dir, "config.json")
         auto_start_sw = self.root.ids.settings_scr.ids.auto_start_sw
         port_no_inp = self.root.ids.settings_scr.ids.port_no_inp
         wakelock_sw = self.root.ids.settings_scr.ids.wakelock_sw
         dark_theme_sw = self.root.ids.settings_scr.ids.dark_theme_sw
 
+        scrub_ts_key = False
         if os.path.exists(self.app_config):
             try:
                 with open(self.app_config, "r", encoding="utf-8") as cf:
@@ -208,16 +209,27 @@ class OpenSmsApp(MDApp):
                 self.config_template["auto_update"] = bool(saved_config.get("auto_update", True))
                 self.config_template["sim_slot"] = int(saved_config.get("sim_slot", -1))
                 if "tailscale" in saved_config and isinstance(saved_config["tailscale"], dict):
-                    self.config_template["tailscale"] = saved_config["tailscale"]
+                    if saved_config["tailscale"]:
+                        # SEC-04 / TS-01: older versions stored a Tailscale credential and a typed-in
+                        # "connection". Both are dropped; Tailscale state is now only ever observed.
+                        scrub_ts_key = True
+                    self.config_template["tailscale"] = {}
+                if saved_config.get("bind_mode") in BIND_MODES:
+                    self.config_template["bind_mode"] = saved_config["bind_mode"]
+                self.config_template["server_desired"] = "start" if saved_config.get("server_desired") == "start" else "stop"
             except Exception as e:
                 print(f"Config load error: {e}")
 
+            if scrub_ts_key:
+                self.write_app_conf()
             self.req_template["port"] = int(self.config_template["port"])
-            if self.config_template["boot"]:
-                self.req_template["server"] = "start"
-                Thread(target=self.write_request, daemon=True).start()
+            self.req_template["bind"] = normalize_bind_mode(self.config_template.get("bind_mode"))
         else:
             self.write_app_conf()
+        # Restore the user's last choice (running / stopped) instead of forcing "stop" at every launch
+        self.req_template.update(initial_request(
+            self.config_template, self.req_template.get("port", 9292), self.req_template.get("bind", BIND_ALL)))
+        self.write_request()
 
         self.theme_style = self.config_template.get("theme", "Light")
         self.theme_cls.theme_style = self.theme_style
@@ -246,7 +258,7 @@ class OpenSmsApp(MDApp):
         self.detected_ips = get_device_ip_addresses()
         port = self.req_template.get("port", 9292)
         ts_status = TailscaleService.get_status()
-        preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port)
+        preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port, self.config_template.get('bind_mode', BIND_ALL))
         all_ips = ts_status.get("all_ips") or self.detected_ips
         ip_label_text = ", ".join(all_ips)
 
@@ -306,15 +318,15 @@ class OpenSmsApp(MDApp):
                 try:
                     with open(self.resp_path, "r", encoding="utf-8") as rf:
                         resp = json.load(rf)
+                    if resp and not resp_is_fresh(resp):
+                        resp = None   # stale status from a service that is no longer running
                     if resp:
                         server_stat = resp.get("server", "")
                         port = self.req_template.get("port", 9292)
-                        preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port)
+                        preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port, self.config_template.get('bind_mode', BIND_ALL))
 
                         if server_stat == "started" and not self.api_started:
                             self.api_started = True
-                            if self.config_template.get("wakelock", True):
-                                self.acquire_wakelock()
                             # Thread-safe UI update
                             def update_started_ui(dt):
                                 home = self.root.ids.home_scr
@@ -333,7 +345,10 @@ class OpenSmsApp(MDApp):
 
                         elif server_stat == "stopped" and self.api_started:
                             self.api_started = False
-                            self.release_wakelock()
+                            if self._stop_service_when_stopped:
+                                # The user pressed Stop: end the background service too (and its notification)
+                                self._stop_service_when_stopped = False
+                                Clock.schedule_once(lambda dt: self.stop_service(), 0.5)
                             # Thread-safe UI update
                             def update_stopped_ui(dt):
                                 home = self.root.ids.home_scr
@@ -352,7 +367,6 @@ class OpenSmsApp(MDApp):
                             error_detail = resp.get("error", "Port conflict or bind error")
                             if self.api_started:
                                 self.api_started = False
-                                self.release_wakelock()
                             def update_error_ui(dt):
                                 home = self.root.ids.home_scr
                                 home.is_online = False
@@ -378,6 +392,35 @@ class OpenSmsApp(MDApp):
     def write_app_conf(self):
         atomic_write_json(self.app_config, self.config_template)
 
+    def open_battery_settings(self, instance=None):
+        """Open Android's battery-optimisation list so the user can exempt OpenSMS (keeps the gateway alive in Doze)."""
+        if platform != "android":
+            self.show_toast_msg("Only available on Android")
+            return
+        try:
+            Intent = autoclass('android.content.Intent')
+            Settings = autoclass('android.provider.Settings')
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            PythonActivity.mActivity.startActivity(intent)
+        except Exception as e:
+            self.show_toast_msg(f"Could not open battery settings: {e}", is_error=True)
+
+    def service_alive(self) -> bool:
+        """True when the background service has written a recent heartbeat."""
+        try:
+            with open(self.resp_path, "r", encoding="utf-8") as rf:
+                return resp_is_fresh(json.load(rf))
+        except (OSError, ValueError):
+            return False
+
+    def require_gateway_service(self) -> bool:
+        """In-app sending needs the service (it owns the queue). Explain instead of queueing into the void."""
+        if self.service_alive():
+            return True
+        self.show_toast_msg("The gateway is not running. Open Home and tap Start Server first.", is_error=True)
+        return False
+
     def write_request(self):
         atomic_write_json(self.request_path, self.req_template)
 
@@ -388,9 +431,20 @@ class OpenSmsApp(MDApp):
         key_ok = self.check_if_key_exists()
         if key_ok:
             if not self.api_started:
+                self.config_template["server_desired"] = "start"
+                Thread(target=self.write_app_conf, daemon=True).start()
+                self._stop_service_when_stopped = False
+                if platform == "android":
+                    try:
+                        self.start_service()      # idempotent: "service exists, do not start again"
+                    except Exception as e:
+                        print(f"Error while starting android service: {e}")
                 self.req_template["server"] = "start"
                 self.write_request()
             else:
+                self.config_template["server_desired"] = "stop"
+                Thread(target=self.write_app_conf, daemon=True).start()
+                self._stop_service_when_stopped = platform == "android"
                 self.req_template["server"] = "stop"
                 self.write_request()
         else:
@@ -486,7 +540,7 @@ class OpenSmsApp(MDApp):
         )
         self.show_text_dialog(
             "Generate API Key",
-            "Generate a new API key? This will immediately invalidate existing keys.",
+            "Generate a new API key? Existing keys keep working until they are revoked.",
             None,
             buttons
         )
@@ -495,10 +549,11 @@ class OpenSmsApp(MDApp):
         self.txt_dialog_closer()
         self.api_key = generate_new_api_key()
         if self.api_key:
-            Clipboard.copy(self.api_key)
+            # SEC-06: the secret is NOT auto-copied to the clipboard and NOT injected into the
+            # code-snippet cache; the user copies it explicitly from the dialog below.
             if "tailscale_scr" in self.root.ids:
                 port = self.req_template.get("port", 9292)
-                self.root.ids.tailscale_scr.update_tailscale_info(port=port, api_key=self.api_key)
+                self.root.ids.tailscale_scr.update_tailscale_info(port=port)
             custom = MDDialogContentContainer(
                 ApiKeyTxtbox(text=self.api_key)
             )
@@ -518,7 +573,7 @@ class OpenSmsApp(MDApp):
             )
             self.show_text_dialog(
                 "Your New API Key",
-                "The key is copied to clipboard. Store it securely! It will not be displayed again.",
+                "Tap Copy Key and store it securely. It will not be shown again.",
                 custom,
                 buttons
             )
@@ -539,13 +594,13 @@ class OpenSmsApp(MDApp):
     ## Copy helpers for home screen
     def copy_endpoint_url(self, instance=None):
         port = self.req_template.get("port", 9292)
-        endpoint, _ = TailscaleService.get_preferred_endpoint(port)
+        endpoint, _ = TailscaleService.get_preferred_endpoint(port, self.config_template.get('bind_mode', BIND_ALL))
         Clipboard.copy(endpoint)
         self.show_toast_msg(f"Copied endpoint: {endpoint}")
 
     def copy_curl_example(self, instance=None):
         port = self.req_template.get("port", 9292)
-        endpoint, _ = TailscaleService.get_preferred_endpoint(port)
+        endpoint, _ = TailscaleService.get_preferred_endpoint(port, self.config_template.get('bind_mode', BIND_ALL))
         curl_cmd = (
             f"curl -i -X POST '{endpoint}' \\\n"
             f"  -H 'Content-Type: application/json' \\\n"
@@ -603,10 +658,9 @@ class OpenSmsApp(MDApp):
         if self.config_template.get("wakelock") == is_active:
             return
         self.config_template["wakelock"] = is_active
-        if is_active and self.api_started:
-            self.acquire_wakelock()
-        elif not is_active:
-            self.release_wakelock()
+        # The wake lock is held by the background service while the server runs; tell it the new setting
+        self.req_template["wakelock"] = bool(is_active)
+        Thread(target=self.write_request, daemon=True).start()
         Thread(target=self.write_app_conf, daemon=True).start()
 
     def toggle_auto_start(self, switch_instance, is_active=None):
@@ -714,10 +768,14 @@ class OpenSmsApp(MDApp):
             "boot": False,
             "wakelock": True,
             "theme": "Light",
+            "auto_update": True,
+            "sim_slot": -1,
+            "bind_mode": BIND_ALL,
+            "server_desired": "stop",
             "tailscale": {}
         }
-        TailscaleService.disconnect_key()
         self.req_template["port"] = 9292
+        self.req_template["bind"] = BIND_ALL
         self.theme_cls.theme_style = "Light"
         self.refresh_settings_view()
         self.update_network_addresses()
@@ -725,34 +783,6 @@ class OpenSmsApp(MDApp):
         Thread(target=self.write_request, daemon=True).start()
         Clock.schedule_once(lambda dt: self.show_toast_msg("Settings reset to defaults."))
 
-    ## Wakelock handling
-    def acquire_wakelock(self):
-        if self.wake_lock:
-            return
-        if platform == "android":
-            try:
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                Context = autoclass("android.content.Context")
-                activity = PythonActivity.mActivity
-                PowerManager = autoclass("android.os.PowerManager")
-                power_manager = cast(PowerManager, activity.getSystemService(Context.POWER_SERVICE))
-                # Use PARTIAL_WAKE_LOCK (keeps CPU on in background without screen)
-                self.wake_lock = power_manager.newWakeLock(
-                    PowerManager.PARTIAL_WAKE_LOCK, "OpenSmsApp::WakeLockTag"
-                )
-                self.wake_lock.acquire()
-                print("Partial WakeLock acquired")
-            except Exception as e:
-                print(f"Wake lock acquire error: {e}")
-
-    def release_wakelock(self):
-        if self.wake_lock and self.wake_lock.isHeld():
-            try:
-                self.wake_lock.release()
-                self.wake_lock = None
-                print("WakeLock released")
-            except Exception as e:
-                print(f"Wake lock release error: {e}")
 
     ## UI helpers & dialogs
     def show_toast_msg(self, message, is_error=False, duration=3):
@@ -841,21 +871,19 @@ class OpenSmsApp(MDApp):
         content_container = MDDialogContentContainer(content_box)
 
         def do_send(inst):
-            phone = sanitize_phone_number(phone_input.text)
-            msg = msg_input.text.strip()
-            if not phone or not msg:
-                self.show_toast_msg("Valid phone number and message cannot be empty", is_error=True)
+            # The test message goes through the gateway queue like any other, so it shows up in Messages
+            # with its real status (it no longer bypasses the message table).
+            from services.outbox import write_outbox
+            if not self.require_gateway_service():
+                return
+            try:
+                write_outbox(self.config_dir, phone_input.text, msg_input.text,
+                             self.config_template.get("sim_slot", -1))
+            except (ValueError, OSError) as e:
+                self.show_toast_msg(f"Cannot send: {e}", is_error=True)
                 return
             self.txt_dialog_closer()
-            self.show_toast_msg(f"Sending test SMS to {phone}...")
-            def worker():
-                preferred_slot = self.config_template.get("sim_slot", -1)
-                stat = send_sms(phone, msg, sim_slot=preferred_slot)
-                if stat:
-                    Clock.schedule_once(lambda dt: self.show_toast_msg(f"Test SMS sent to {phone}!"))
-                else:
-                    Clock.schedule_once(lambda dt: self.show_toast_msg("Test SMS failed to send", is_error=True))
-            Thread(target=worker, daemon=True).start()
+            self.show_toast_msg("Test SMS queued. Open Messages to follow its status.")
 
         buttons = MDDialogButtonContainer(
             Widget(),
@@ -999,10 +1027,16 @@ class OpenSmsApp(MDApp):
             def progress(percent, dl_bytes, total_bytes):
                 pass
 
-            res = UpdateManager.download_apk(apk_url, target_file, progress_callback=progress)
+            res = UpdateManager.download_apk(apk_url, target_file, progress_callback=progress,
+                                             expected_sha256=update_info.get("apk_sha256"))
             if res.get("success"):
-                Clock.schedule_once(lambda dt: self.show_toast_msg("Download complete! Launching installer..."))
-                inst = UpdateManager.install_apk(target_file)
+                note = "Download verified. Launching installer..." if res.get("verified") else \
+                       "Download complete (no published checksum to verify). Launching installer..."
+                Clock.schedule_once(lambda dt: self.show_toast_msg(note))
+                inst = UpdateManager.install_apk(
+                    target_file,
+                    on_status=lambda kind, text: Clock.schedule_once(
+                        lambda dt: self.show_toast_msg(text, is_error=(kind == "error"))))
                 if not inst.get("success"):
                     Clock.schedule_once(lambda dt: self.show_toast_msg(inst.get("error", "Installation error"), is_error=True))
             else:
@@ -1044,29 +1078,40 @@ class OpenSmsApp(MDApp):
             pass
 
     ## Tailscale in-app config persistence
-    def save_tailscale_config(self, key: str, ip: str = None, node_name: str = None, mode: str = "configured"):
-        if "tailscale" not in self.config_template:
-            self.config_template["tailscale"] = {}
-        self.config_template["tailscale"] = {
-            "key": key,
-            "ip": ip,
-            "node_name": node_name,
-            "mode": mode,
-            "connected": bool(ip)
-        }
+    def set_bind_mode(self, mode: str, confirmed: bool = False):
+        """Choose which network the API listens on: all / tailscale / localhost."""
+        mode = normalize_bind_mode(mode)
+        if mode == self.config_template.get("bind_mode", BIND_ALL):
+            return
+        if mode != BIND_ALL and not confirmed:
+            msg = {
+                "tailscale": "Only devices on your tailnet will be able to reach the API. If Tailscale is not "
+                             "connected the server will not start (it never falls back to Wi-Fi/LAN).",
+                "localhost": "Only this phone will be able to reach the API. Other devices, including over "
+                             "Tailscale, will be locked out until you change this back.",
+            }[mode]
+            buttons = MDDialogButtonContainer(
+                Widget(),
+                MDButton(MDButtonText(text="Cancel"), style="text", on_release=self.txt_dialog_closer),
+                MDButton(
+                    MDButtonText(text="Apply", theme_text_color="Custom", text_color="green"),
+                    style="text",
+                    on_release=lambda x: (self.txt_dialog_closer(x), self.set_bind_mode(mode, confirmed=True)),
+                ),
+                spacing="8dp",
+            )
+            self.show_text_dialog("Change listening mode?", msg, None, buttons)
+            return
+        self.config_template["bind_mode"] = mode
+        self.req_template["bind"] = mode
         Thread(target=self.write_app_conf, daemon=True).start()
+        Thread(target=self.write_request, daemon=True).start()
         self.update_network_addresses()
-
-    def clear_tailscale_config(self):
-        self.config_template["tailscale"] = {
-            "key": "",
-            "ip": None,
-            "node_name": None,
-            "mode": None,
-            "connected": False
-        }
-        Thread(target=self.write_app_conf, daemon=True).start()
-        self.update_network_addresses()
+        if "tailscale_scr" in self.root.ids:
+            self.root.ids.tailscale_scr.update_tailscale_info(port=self.req_template.get("port", 9292))
+        self.show_toast_msg({"all": "Listening on all networks",
+                             "tailscale": "Listening on Tailscale only",
+                             "localhost": "Listening on this device only"}[mode])
 
     def copy_endpoint_url_from_drawer(self):
         self.close_nav_drawer()
@@ -1086,71 +1131,25 @@ class OpenSmsApp(MDApp):
 
     def show_key_help_dialog(self, instance=None):
         help_text = (
-            "How to connect OpenSMS to Tailscale:\n\n"
-            "1. API Access Token (Recommended):\n"
-            "   • Visit https://login.tailscale.com/admin/settings/keys\n"
-            "   • Generate an API Access Token (tskey-api-...)\n"
-            "   • Paste it here and tap 'Connect & Get IP'\n"
-            "   • OpenSMS queries your Tailnet and binds the device IP!\n\n"
-            "2. Direct 100.x.y.z IP:\n"
-            "   • If your device is already running Tailscale, enter its 100.x.y.z IP address directly.\n\n"
-            "3. Native Tailscale Android App:\n"
-            "   • Simply install Tailscale from the Play Store and log in.\n"
-            "   • OpenSMS detects the live VPN tunnel automatically!"
+            "How OpenSMS works with Tailscale:\n\n"
+            "1. Install the Tailscale app, sign in and connect. OpenSMS does not join your tailnet "
+            "itself and never asks for a Tailscale key.\n\n"
+            "2. OpenSMS then sees the Tailscale address (100.x.y.z) of this phone and shows it here. "
+            "Use that address from your other devices: http://<address>:<port>/sms/\n\n"
+            "3. To keep the API off Wi-Fi/LAN, set the listening mode to 'Tailscale only'.\n\n"
+            "Android allows only one VPN at a time, so another VPN will switch Tailscale off."
         )
         buttons = MDDialogButtonContainer(
             Widget(),
+            MDButton(MDButtonText(text="Close"), style="text", on_release=self.txt_dialog_closer),
             MDButton(
-                MDButtonText(text="Close"),
+                MDButtonText(text="Open Tailscale", theme_text_color="Custom", text_color="blue"),
                 style="text",
-                on_release=self.txt_dialog_closer
-            ),
-            MDButton(
-                MDButtonText(text="Open Tailscale Keys", theme_text_color="Custom", text_color="blue"),
-                style="text",
-                on_release=lambda x: self.open_tailscale_keys_web()
+                on_release=lambda x: (self.txt_dialog_closer(x), self.open_or_install_tailscale())
             ),
             spacing="8dp",
         )
-        self.show_text_dialog(
-            "Tailscale Setup Guide",
-            help_text,
-            None,
-            buttons
-        )
-
-    def open_tailscale_keys_web(self, instance=None):
-        self.txt_dialog_closer()
-        url = "https://login.tailscale.com/admin/settings/keys"
-        if platform == "android":
-            try:
-                Intent = autoclass('android.content.Intent')
-                Uri = autoclass('android.net.Uri')
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                currentActivity = PythonActivity.mActivity
-                intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                currentActivity.startActivity(intent)
-                return
-            except Exception as e:
-                print(f"Error opening browser: {e}")
-        import webbrowser
-        webbrowser.open(url)
-
-    ## Drawer action hooks
-    def open_test_sms_from_drawer(self):
-        self.close_nav_drawer()
-        Clock.schedule_once(lambda dt: self.show_test_sms_dialog(), 0.2)
-
-    def open_vpn_guide_from_drawer(self):
-        self.goto_tailscale_screen()
-
-    def open_about_from_drawer(self):
-        self.close_nav_drawer()
-        Clock.schedule_once(lambda dt: self.show_about_dialog(), 0.2)
-
-    def goto_logs_screen(self, instance=None):
-        self.close_nav_drawer()
-        self.go_to_screen("Logs")
+        self.show_text_dialog("Tailscale Setup Guide", help_text, None, buttons)
 
     def goto_tailscale_screen(self, instance=None):
         self.close_nav_drawer()
@@ -1159,15 +1158,20 @@ class OpenSmsApp(MDApp):
     def open_or_install_tailscale(self, instance=None):
         """Open Tailscale app if installed, or open Google Play Store / download page."""
         if platform == "android":
+            # An explicit launcher intent works even when Android 11+ package visibility hides the app from
+            # getLaunchIntentForPackage(); it raises if Tailscale is not installed -> store fallback below.
+            # (device-untested)
             try:
+                Intent = autoclass('android.content.Intent')
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 currentActivity = PythonActivity.mActivity
-                packageManager = currentActivity.getPackageManager()
-                launchIntent = packageManager.getLaunchIntentForPackage("com.tailscale.ipn")
-                if launchIntent:
-                    currentActivity.startActivity(launchIntent)
-                    self.show_toast_msg("Opening Tailscale...")
-                    return
+                launch = Intent(Intent.ACTION_MAIN)
+                launch.addCategory(Intent.CATEGORY_LAUNCHER)
+                launch.setPackage("com.tailscale.ipn")
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                currentActivity.startActivity(launch)
+                self.show_toast_msg("Opening Tailscale...")
+                return
             except Exception as e:
                 print(f"Tailscale launch notice: {e}")
 
@@ -1223,6 +1227,20 @@ class OpenSmsApp(MDApp):
         if "tailscale_scr" in self.root.ids:
             self.root.ids.tailscale_scr.update_tailscale_info(port=port)
 
+    def _plain_screen_entry(self, title: str):
+        self.screen_title = title
+        self.root.ids.top_back_btn.opacity = 0
+        self.root.ids.top_back_btn.disabled = True
+
+    def on_messages_entry(self, instance=None):
+        self._plain_screen_entry("OpenSMS • Messages")
+
+    def on_system_entry(self, instance=None):
+        self._plain_screen_entry("OpenSMS • System")
+
+    def on_api_entry(self, instance=None):
+        self._plain_screen_entry("OpenSMS • API Keys")
+
     def on_settings_entry(self, instance=None):
         self.screen_title = "OpenSMS • Settings"
         self.root.ids.top_back_btn.opacity = 1
@@ -1253,10 +1271,9 @@ class OpenSmsApp(MDApp):
         return False
 
     def on_stop(self):
-        print("Exiting app...")
-        if platform == "android":
-            self.stop_service()
-            self.release_wakelock()
+        # The gateway is a background service: closing or swiping away the app leaves it running.
+        # It only stops when the user presses Stop Server.
+        print("Exiting app (the gateway service keeps running)...")
 
     def on_switch_tabs(
             self,

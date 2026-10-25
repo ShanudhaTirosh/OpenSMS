@@ -1,14 +1,14 @@
 # OpenSMS API for LLMs & AI Agents
 
-> OpenSMS is an open-source, privacy-first Android application that turns an Android device into a high-performance cellular SMS Gateway REST API server. Supports local Wi-Fi, Tailscale WireGuard Mesh, Dual-SIM routing, and SQLite WAL persistence.
+> OpenSMS is an open-source, privacy-first Android application that turns an Android device into a high-performance cellular SMS Gateway REST API server. Works over local Wi-Fi or a Tailscale tailnet (using the official Tailscale app on the phone), with Dual-SIM routing and SQLite persistence.
 
 ## Core Capabilities
 - **Direct Cellular SMS Dispatch**: Sends real SMS messages over native cellular modems via standard HTTP REST requests.
-- **Cross-Network Connectivity**: Reaches devices across cellular CGNAT, home Wi-Fi, or cloud VPCs using zero-config Tailscale WireGuard Mesh (`100.x.y.z`).
+- **Cross-Network Connectivity**: With the Tailscale app installed and connected on the phone, other tailnet devices reach it at its `100.x.y.z` address. OpenSMS observes this address; it does not join the tailnet itself.
 - **Dual-SIM Telephony**: Routes messages via specific carrier slots (`sim_slot: 0` or `1`) or system auto-selection.
-- **Message Lifecycle Tracking**: Persistent delivery tracking (`queued`, `sending`, `sent`, `failed`) backed by SQLite WAL mode.
+- **Message Lifecycle Tracking**: Persistent status (`queued`, `submitted`, `sent`, `delivered`, `failed`, `unknown`). Only `delivered` is a delivery confirmation, and it needs a carrier delivery report.
 - **Batch Processing**: Up to 100 SMS messages per call with 100ms hardware pacing.
-- **Security**: SHA-256 Bearer Token authentication with brute-force rate-limiting.
+- **Security**: SHA-256-hashed Bearer keys with scopes (`sms:write`, `sms:read`, `admin`), brute-force lockout, per-key send limit, idempotent retries via `Idempotency-Key`.
 
 ## AI & Developer Documentation Links
 - [API Reference](docs/api-reference.md): Complete REST endpoint specifications, request/response JSON schemas, and error codes.
@@ -26,14 +26,17 @@ Authorization Header: `Authorization: Bearer <API_KEY>`
 | `/health/` | GET | Gateway liveness probe | No |
 | `/sms/` | POST | Send single SMS | Yes |
 | `/sms/batch/` | POST | Send batch SMS (max 100) | Yes |
-| `/sms/{id}` | GET | Get SMS delivery status | Yes |
-| `/sms/history/` | GET | List historical messages | Yes |
+| `/sms/{id}` | GET | Get message status and per-part receipts | Yes |
+| `/sms/history` | GET | List messages (`limit`, `offset`, `status`, `search`; returns `total`, `has_more`) | Yes |
+| `/keys/` | GET, POST | List / create API keys | Yes (`admin`) |
+| `/keys/{id}` | DELETE | Revoke an API key | Yes (`admin`) |
 | `/system/stats/` | GET | Sent today, success rate, queue | Yes |
 | `/system/sims/` | GET | Active SIM slots & carriers | Yes |
 | `/system/update/`| GET | Check for GitHub updates | Yes |
-| `/llms.txt` | GET | This discovery file | No |
+| `/llms.txt` | GET | This discovery file | Yes (unless the gateway runs with `OPENSMS_PUBLIC_DOCS=1`) |
 
 ## Rules for AI Code Generation
 1. Always format phone numbers with standard international E.164 notation (e.g., `+1234567890`) or national digits. The gateway automatically strips spaces, hyphens, and brackets.
 2. Standard SMS segment size is 160 characters for GSM-7 plain text, and 70 characters when Unicode/emojis are present (UCS-2). The API handles segmentation automatically via Android native multipart SMS.
-3. Handle HTTP 401 (invalid/missing token), HTTP 429 (rate-limited after 5 failed auth attempts; wait 60s), and HTTP 500 (carrier transmission failure).
+3. Handle HTTP 401 (invalid/missing token), 403 (key lacks the scope), 422 (validation), 429 (too many failed auth attempts or per-key send limit; honour `Retry-After`), 502 (hand-off to telephony failed) and 503 (send queue full). Send an `Idempotency-Key` header on POSTs and reuse it when retrying so a message is never sent twice.
+4. A `200` from `POST /sms/` means the message was handed to Android, NOT delivered. Poll `GET /sms/{id}` and treat only `status: delivered` as delivery confirmation.

@@ -1,266 +1,207 @@
 """
-Tailscale & Cross-Network Integration Service for OpenSMS.
-Handles Tailscale detection, MagicDNS formatting, multi-language code snippets,
-in-app Tailscale Key connection, and cross-network routing diagnostics.
+Tailscale awareness for OpenSMS (read-only).
+
+Design (audit TS-01, see IMPLEMENTATION_PLAN.md section E, option A):
+  The data path is the official Tailscale Android app, which owns the device's VPN. OpenSMS does NOT
+  join a tailnet itself and does not store, accept or send any Tailscale credential. It only
+  *observes* the device and reports what it actually sees:
+
+    connected     a VPN network on this device carries a tailnet address (100.64.0.0/10 or fd7a:115c:a1e0::/48)
+    other_vpn     a VPN is active but has no tailnet address
+    disconnected  no tailnet address found
+    unknown       the network state could not be read
+
+  100.64.0.0/10 is shared with carrier-grade NAT, so an address in that range on a cellular/Wi-Fi
+  interface is NOT treated as Tailscale.
+
+  OpenSMS can also restrict which network the API listens on (bind modes), which is what makes the
+  "tailnet only" setup enforceable.
 """
 
-import re
+import ipaddress
 import socket
-import requests
-from services.pathMgr import is_tailscale_ip, get_network_interfaces_info
+from services.pathMgr import get_network_interfaces_info, get_vpn_networks
+
+BIND_ALL = "all"
+BIND_TAILSCALE = "tailscale"
+BIND_LOCALHOST = "localhost"
+BIND_MODES = (BIND_ALL, BIND_TAILSCALE, BIND_LOCALHOST)
+
+_TS_V4 = ipaddress.ip_network("100.64.0.0/10")
+_TS_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
+# Interface-name hints used ONLY when the OS cannot tell us which networks are VPNs.
+_TUNNEL_PREFIXES = ("tailscale", "tun", "utun", "wg")
+_NON_TUNNEL_HINTS = ("rmnet", "ccmni", "pdp", "wwan", "wlan", "wifi", "eth", "en", "lo")
+
+
+def is_tailnet_address(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(str(ip).split("%")[0].strip())
+    except ValueError:
+        return False
+    return addr in (_TS_V4 if addr.version == 4 else _TS_V6)
+
+
+def normalize_bind_mode(mode) -> str:
+    return mode if mode in BIND_MODES else BIND_ALL
+
+
+def resolve_bind_host(mode: str, tailnet_ip):
+    """
+    Returns (host, error). Fails CLOSED: in tailscale mode without a tailnet address the server must
+    not start (and must never silently fall back to listening on all interfaces).
+    """
+    mode = normalize_bind_mode(mode)
+    if mode == BIND_ALL:
+        return "0.0.0.0", None
+    if mode == BIND_LOCALHOST:
+        return "127.0.0.1", None
+    if tailnet_ip and ":" not in tailnet_ip and is_tailnet_address(tailnet_ip):
+        return tailnet_ip, None
+    return None, ("Tailscale-only mode is on but no Tailscale IPv4 address was found. "
+                  "Start the Tailscale app and connect, or choose another listening mode.")
+
+
+def classify(net_info: dict, vpn_networks, port=None, bind_mode: str = BIND_ALL, listening=None) -> dict:
+    """
+    Pure decision function (unit tested). `vpn_networks` is a list of
+    {"interface": str, "addresses": [str]} for networks the OS marks as VPN, or None when the OS
+    could not be asked (non-Android, missing permission, API failure).
+    """
+    bind_mode = normalize_bind_mode(bind_mode)
+    ts_ip = ts_ip6 = iface = evidence = None
+    diagnostics = []
+    state = "disconnected"
+
+    if vpn_networks is not None:
+        for net in vpn_networks:
+            for a in net.get("addresses", []):
+                if is_tailnet_address(a):
+                    if ":" in a:
+                        ts_ip6 = ts_ip6 or a.split("%")[0]
+                    else:
+                        ts_ip = ts_ip or a
+                    iface = iface or net.get("interface")
+                    evidence = "vpn_network"
+        if ts_ip or ts_ip6:
+            state = "connected"
+        elif vpn_networks:
+            state = "other_vpn"
+    else:
+        # Fallback: interface names. Only tunnel-looking interfaces count.
+        for entry in net_info.get("interfaces", []):
+            name = str(entry.get("name", "")).lower()
+            ip = entry.get("ip", "")
+            if not is_tailnet_address(ip):
+                continue
+            if name.startswith(_TUNNEL_PREFIXES) and not name.startswith(_NON_TUNNEL_HINTS):
+                if ":" in ip:
+                    ts_ip6 = ts_ip6 or ip
+                else:
+                    ts_ip = ts_ip or ip
+                iface, evidence, state = name, "interface", "connected"
+        if state != "connected":
+            state = "unknown" if vpn_networks is None and not net_info.get("interfaces") else "disconnected"
+
+    # carrier-grade NAT look-alikes
+    cgnat = [e for e in net_info.get("interfaces", [])
+             if is_tailnet_address(e.get("ip", "")) and e.get("ip") not in (ts_ip, ts_ip6)]
+    if cgnat:
+        diagnostics.append({"level": "info", "id": "cgnat_ignored",
+                            "text": "Address %s on '%s' is in the Tailscale range but not on a VPN interface "
+                                    "(usually carrier-grade NAT); it was ignored." % (cgnat[0]["ip"], cgnat[0].get("name"))})
+
+    if state == "connected":
+        diagnostics.append({"level": "ok", "id": "tailnet_address", "text": "Tailscale address %s (%s)." % (ts_ip or ts_ip6, evidence.replace("_", " "))})
+    elif state == "other_vpn":
+        diagnostics.append({"level": "warn", "id": "other_vpn", "text": "A VPN is active but has no Tailscale address. Open the Tailscale app and connect (Android allows one VPN at a time)."})
+    elif state == "unknown":
+        diagnostics.append({"level": "warn", "id": "unknown", "text": "Network state could not be read on this device."})
+    else:
+        diagnostics.append({"level": "warn", "id": "disconnected", "text": "No Tailscale address found. Open the Tailscale app, sign in and connect."})
+
+    if bind_mode == BIND_TAILSCALE and not ts_ip:
+        diagnostics.append({"level": "error", "id": "bind_blocked", "text": "Listening mode is 'Tailscale only' but there is no Tailscale IPv4 address, so the API server will not start."})
+    if bind_mode == BIND_ALL and state == "connected":
+        diagnostics.append({"level": "info", "id": "bind_all", "text": "The API also listens on Wi-Fi/LAN. Choose 'Tailscale only' to restrict it to your tailnet."})
+    if bind_mode == BIND_LOCALHOST:
+        diagnostics.append({"level": "info", "id": "bind_localhost", "text": "The API listens on this device only; no other device can reach it."})
+    if listening is True and ts_ip:
+        diagnostics.append({"level": "ok", "id": "listening", "text": "The gateway answers on %s:%s." % (ts_ip, port)})
+    elif listening is False and ts_ip:
+        diagnostics.append({"level": "warn", "id": "not_listening", "text": "Nothing answers on %s:%s. Is the server started and the listening mode compatible?" % (ts_ip, port)})
+
+    return {
+        "state": state,
+        "connected": state == "connected",
+        "ip": ts_ip,
+        "ipv6": ts_ip6,
+        "interface": iface,
+        "evidence": evidence,
+        "bind_mode": bind_mode,
+        "listening": listening,
+        "diagnostics": diagnostics,
+        "all_ips": net_info.get("all_ips", ["127.0.0.1"]),
+        "local_ip": net_info.get("local_ip"),
+        "interfaces": [e for e in net_info.get("interfaces", []) if e.get("ip") in (ts_ip, ts_ip6)],
+        "node_name": None,
+        "mode": evidence,
+        "devices": [],
+        "configured_key": "",
+    }
+
+
+def probe_listener(ip: str, port: int, timeout: float = 1.0) -> bool:
+    """True if something accepts TCP connections on ip:port (a reachability hint, not an auth check)."""
+    try:
+        with socket.create_connection((ip, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
 
 class TailscaleService:
-    _config = {
-        "key": "",
-        "ip": None,
-        "node_name": None,
-        "mode": None,  # "api_token", "direct_ip", "auth_key"
-        "connected": False,
-        "last_sync": None,
-        "devices": []
-    }
+    """Thin facade kept for the UI. Holds NO credentials and NO connection state."""
 
     @classmethod
     def init_config(cls, saved_config: dict):
-        """Load in-app Tailscale settings from app config dictionary."""
-        if not isinstance(saved_config, dict):
-            return
-        ts_data = saved_config.get("tailscale", {})
-        if isinstance(ts_data, dict):
-            cls._config["key"] = ts_data.get("key", "")
-            cls._config["ip"] = ts_data.get("ip")
-            cls._config["node_name"] = ts_data.get("node_name")
-            cls._config["mode"] = ts_data.get("mode")
-            cls._config["connected"] = bool(ts_data.get("connected") and ts_data.get("ip"))
-            cls._config["last_sync"] = ts_data.get("last_sync")
-            cls._config["devices"] = ts_data.get("devices", [])
+        return None  # nothing is persisted any more
 
     @classmethod
     def get_config_dict(cls) -> dict:
-        """Return Tailscale configuration dictionary for persistence in config.json."""
-        return {
-            "key": cls._config.get("key", ""),
-            "ip": cls._config.get("ip"),
-            "node_name": cls._config.get("node_name"),
-            "mode": cls._config.get("mode"),
-            "connected": bool(cls._config.get("connected") and cls._config.get("ip")),
-            "last_sync": cls._config.get("last_sync"),
-            "devices": cls._config.get("devices", [])
-        }
-
-    @classmethod
-    def get_status(cls) -> dict:
-        """
-        Check if Tailscale is active on the device (either via physical device interface
-        or configured via in-app Tailscale key/IP) and retrieve its configuration.
-        """
-        net_info = get_network_interfaces_info()
-        live_ts_ip = net_info.get("tailscale_ip")
-
-        # 1. Physical / OS device interface takes highest precedence
-        if live_ts_ip:
-            return {
-                "connected": True,
-                "ip": live_ts_ip,
-                "interfaces": [iface for iface in net_info.get("interfaces", []) if iface.get("is_tailscale")],
-                "node_name": cls._config.get("node_name") or "opensms-gateway",
-                "mode": "device_interface",
-                "all_ips": net_info.get("all_ips", ["127.0.0.1"]),
-                "local_ip": net_info.get("local_ip"),
-                "configured_key": cls._config.get("key", ""),
-                "devices": cls._config.get("devices", [])
-            }
-
-        # 2. In-app configured key / direct IP
-        if cls._config.get("connected") and cls._config.get("ip"):
-            ts_ip = cls._config["ip"]
-            all_ips = [ts_ip] + [ip for ip in net_info.get("all_ips", []) if ip != ts_ip]
-            return {
-                "connected": True,
-                "ip": ts_ip,
-                "interfaces": [{"name": "in-app-tailscale", "ip": ts_ip, "type": "tailscale", "is_tailscale": True}],
-                "node_name": cls._config.get("node_name") or f"opensms-{ts_ip.replace('.', '-')}",
-                "mode": cls._config.get("mode") or "in_app_key",
-                "all_ips": all_ips,
-                "local_ip": net_info.get("local_ip"),
-                "configured_key": cls._config.get("key", ""),
-                "devices": cls._config.get("devices", [])
-            }
-
-        # 3. Not connected
-        return {
-            "connected": False,
-            "ip": None,
-            "interfaces": [],
-            "node_name": None,
-            "mode": None,
-            "all_ips": net_info.get("all_ips", ["127.0.0.1"]),
-            "local_ip": net_info.get("local_ip"),
-            "configured_key": cls._config.get("key", ""),
-            "devices": []
-        }
-
-    @classmethod
-    def connect_tailscale_key(cls, raw_input: str, device_filter: str = None) -> dict:
-        """
-        Connect to Tailscale using an Auth Key, API Token, or Direct 100.x.y.z IP.
-        - API Token (tskey-api-...): Queries Tailscale REST API to fetch nodes and auto-select device IP.
-        - Direct IP (100.64.0.0/10): Directly sets the Tailscale Mesh IPv4 address.
-        - Auth Key (tskey-auth-...): Validates key format and pairs with the local node.
-        """
-        import datetime
-        raw_input = (raw_input or "").strip()
-        if not raw_input:
-            return {"success": False, "error": "Please enter a Tailscale Key, API Token, or Tailscale IP."}
-
-        # Case 1: Direct Tailscale IP (e.g. "100.85.12.34" or "100.85.12.34:9292")
-        ip_candidate = raw_input.split(":")[0].strip()
-        if is_tailscale_ip(ip_candidate):
-            node_name = f"node-{ip_candidate.replace('.', '-')}"
-            cls._config["key"] = ip_candidate
-            cls._config["ip"] = ip_candidate
-            cls._config["node_name"] = node_name
-            cls._config["mode"] = "direct_ip"
-            cls._config["connected"] = True
-            cls._config["last_sync"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cls._config["devices"] = [{"name": node_name, "ip": ip_candidate, "os": "android"}]
-            return {
-                "success": True,
-                "ip": ip_candidate,
-                "node_name": node_name,
-                "mode": "direct_ip",
-                "message": f"Tailscale IP {ip_candidate} connected successfully!"
-            }
-
-        # Case 2: Tailscale API Token (tskey-api-...) or long token
-        if raw_input.startswith("tskey-api-") or (len(raw_input) >= 30 and ("api" in raw_input.lower() or not raw_input.startswith("tskey-auth-"))):
-            try:
-                headers = {"Authorization": f"Bearer {raw_input}"}
-                url = "https://api.tailscale.com/api/v2/tailnet/-/devices"
-                resp = requests.get(url, headers=headers, timeout=12)
-
-                if resp.status_code == 200:
-                    data = resp.json()
-                    raw_devices = data.get("devices", [])
-                    if not raw_devices:
-                        return {"success": False, "error": "API Key is valid, but no devices were found in your Tailnet."}
-
-                    devices_summary = []
-                    candidate_device = None
-
-                    for dev in raw_devices:
-                        dev_name = dev.get("name", "").split(".")[0] or dev.get("hostname", "unknown")
-                        dev_os = str(dev.get("os", "")).lower()
-                        addresses = dev.get("addresses", [])
-                        ipv4_ts = next((addr for addr in addresses if is_tailscale_ip(addr)), None)
-                        if ipv4_ts:
-                            dev_info = {
-                                "id": dev.get("id"),
-                                "name": dev_name,
-                                "hostname": dev.get("hostname"),
-                                "ip": ipv4_ts,
-                                "os": dev_os,
-                                "online": dev.get("online", False),
-                                "last_seen": dev.get("lastSeen")
-                            }
-                            devices_summary.append(dev_info)
-
-                            # Filter matching or prioritize android / online
-                            if not candidate_device:
-                                candidate_device = dev_info
-                            elif device_filter and (device_filter.lower() in dev_name.lower() or device_filter.lower() in dev_os):
-                                candidate_device = dev_info
-                            elif dev_os == "android" and candidate_device.get("os") != "android":
-                                candidate_device = dev_info
-                            elif dev_info.get("online") and not candidate_device.get("online"):
-                                candidate_device = dev_info
-
-                    if not candidate_device:
-                        return {"success": False, "error": "No devices with 100.x.y.z IPv4 addresses found in this Tailnet."}
-
-                    chosen_ip = candidate_device["ip"]
-                    chosen_name = candidate_device["name"]
-
-                    cls._config["key"] = raw_input
-                    cls._config["ip"] = chosen_ip
-                    cls._config["node_name"] = chosen_name
-                    cls._config["mode"] = "api_token"
-                    cls._config["connected"] = True
-                    cls._config["last_sync"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    cls._config["devices"] = devices_summary
-
-                    return {
-                        "success": True,
-                        "ip": chosen_ip,
-                        "node_name": chosen_name,
-                        "mode": "api_token",
-                        "devices": devices_summary,
-                        "message": f"Connected to Tailnet! Synced device '{chosen_name}' ({chosen_ip})."
-                    }
-
-                elif resp.status_code in (401, 403):
-                    return {"success": False, "error": "Invalid Tailscale API token or permission denied."}
-                else:
-                    return {"success": False, "error": f"Tailscale API error HTTP {resp.status_code}."}
-
-            except requests.exceptions.RequestException as re_err:
-                return {"success": False, "error": f"Could not reach Tailscale API: {str(re_err)}"}
-            except Exception as e:
-                return {"success": False, "error": f"Connection error: {str(e)}"}
-
-        # Case 3: Tailscale Auth Key (tskey-auth-...)
-        if raw_input.startswith("tskey-auth-"):
-            net_info = get_network_interfaces_info()
-            live_ip = net_info.get("tailscale_ip")
-            cls._config["key"] = raw_input
-            cls._config["ip"] = live_ip or cls._config.get("ip")
-            cls._config["node_name"] = "opensms-node"
-            cls._config["mode"] = "auth_key"
-            cls._config["connected"] = bool(cls._config["ip"])
-            cls._config["last_sync"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            return {
-                "success": True,
-                "ip": cls._config["ip"],
-                "node_name": "opensms-node",
-                "mode": "auth_key",
-                "message": "Tailscale Auth Key registered. " + (
-                    f"Connected on IP {cls._config['ip']}." if cls._config["ip"] else "Key saved. Launch Tailscale on device to activate interface."
-                )
-            }
-
-        return {
-            "success": False,
-            "error": "Unrecognized key format. Please enter an API token (tskey-api-...), Auth Key (tskey-auth-...), or Tailscale IP (100.x.y.z)."
-        }
+        return {}
 
     @classmethod
     def disconnect_key(cls) -> dict:
-        """Disconnect and clear configured Tailscale key and virtual IP."""
-        cls._config = {
-            "key": "",
-            "ip": None,
-            "node_name": None,
-            "mode": None,
-            "connected": False,
-            "last_sync": None,
-            "devices": []
-        }
-        return {"success": True, "message": "Tailscale in-app key disconnected."}
+        return {"success": True, "message": "Nothing to disconnect: OpenSMS keeps no Tailscale credential."}
 
     @classmethod
-    def get_preferred_endpoint(cls, port: int = 9292) -> tuple[str, str]:
-        """
-        Returns (endpoint_url, network_type).
-        Prioritizes Tailscale Mesh IP (for worldwide cross-network access),
-        then local Wi-Fi/LAN IP, then 127.0.0.1.
-        """
-        status = cls.get_status()
+    def get_status(cls, port=None, bind_mode: str = BIND_ALL, probe: bool = False) -> dict:
+        net_info = get_network_interfaces_info()
+        try:
+            vpn = get_vpn_networks()
+        except Exception:
+            vpn = None
+        status = classify(net_info, vpn, port=port, bind_mode=bind_mode)
+        if probe and port and status["ip"]:
+            return classify(net_info, vpn, port=port, bind_mode=bind_mode,
+                            listening=probe_listener(status["ip"], port))
+        return status
+
+    @classmethod
+    def get_preferred_endpoint(cls, port: int = 9292, bind_mode: str = BIND_ALL) -> tuple[str, str]:
+        """(endpoint_url, network_type) that a remote client can actually use under `bind_mode`."""
+        status = cls.get_status(bind_mode=bind_mode)
+        mode = normalize_bind_mode(bind_mode)
+        if mode == BIND_LOCALHOST:
+            return f"http://127.0.0.1:{port}/sms/", "This device only"
         if status["connected"] and status["ip"]:
-            return f"http://{status['ip']}:{port}/sms/", "Tailscale Mesh"
-        elif status["local_ip"]:
+            return f"http://{status['ip']}:{port}/sms/", "Tailscale"
+        if mode == BIND_TAILSCALE:
+            return f"http://<tailscale-ip>:{port}/sms/", "Tailscale (not connected)"
+        if status["local_ip"]:
             return f"http://{status['local_ip']}:{port}/sms/", "Local Wi-Fi / LAN"
-        else:
-            return f"http://127.0.0.1:{port}/sms/", "Localhost"
+        return f"http://127.0.0.1:{port}/sms/", "Localhost"
 
     @staticmethod
     def generate_code_snippets(endpoint: str, api_key: str = "YOUR_API_KEY", phone: str = "+1234567890", text: str = "Hello from OpenSMS!") -> dict[str, str]:

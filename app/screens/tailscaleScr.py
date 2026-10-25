@@ -1,6 +1,7 @@
 from threading import Thread
 
 from kivymd.uix.boxlayout import MDBoxLayout
+from kivymd.uix.gridlayout import MDGridLayout
 from kivymd.uix.button import MDButton, MDButtonIcon, MDButtonText
 from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.textfield import MDTextField
@@ -28,7 +29,7 @@ Builder.load_string('''
             spacing: dp(14)
             padding: dp(8), dp(4), dp(8), dp(16)
 
-            # In-App Tailscale Direct Key Setup Card
+            # Listening mode card (which network the API listens on)
             MDBoxLayout:
                 orientation: 'vertical'
                 adaptive_height: True
@@ -38,79 +39,41 @@ Builder.load_string('''
                 theme_bg_color: "Custom"
                 md_bg_color: [0.08, 0.28, 0.52, 0.16] if app.theme_style == "Light" else [0.09, 0.22, 0.38, 0.8]
 
-                MDBoxLayout:
-                    orientation: 'horizontal'
+                MDLabel:
+                    text: "API listening mode"
+                    font_style: "Title"
+                    role: "medium"
                     adaptive_height: True
-                    spacing: dp(8)
-
-                    MDButtonIcon:
-                        icon: "key-wireless"
-                        theme_icon_color: "Custom"
-                        icon_color: [0.15, 0.65, 0.95, 1]
-                        pos_hint: {"center_y": 0.5}
-
-                    MDLabel:
-                        text: "In-App Tailscale Connection"
-                        font_style: "Title"
-                        role: "medium"
-                        adaptive_height: True
-                        pos_hint: {"center_y": 0.5}
 
                 MDLabel:
-                    text: "Enter your Tailscale API Key (tskey-api-...), Auth Key (tskey-auth-...), or Tailscale 100.x.y.z IP. OpenSMS connects directly and extracts your mesh endpoint."
+                    text: root.bind_help_text
                     font_style: "Body"
                     role: "small"
                     theme_text_color: "Secondary"
                     adaptive_height: True
 
-                MDTextField:
-                    id: ts_key_inp
-                    text: root.ts_key_input_text
-                    mode: "outlined"
-                    hint_text: "Tailscale Key or IP (tskey-api-... / 100.x.y.z)"
-                    size_hint_y: None
-                    height: dp(56)
-
-                # Key Action Buttons
-                MDBoxLayout:
-                    orientation: 'horizontal'
+                MDGridLayout:
+                    cols: 3
                     adaptive_height: True
                     spacing: dp(8)
-                    pos_hint: {"center_x": 0.5}
 
                     MDButton:
-                        style: "filled"
-                        on_release: root.connect_key()
-                        MDButtonIcon:
-                            icon: "lan-connect"
+                        style: "filled" if root.bind_mode == "all" else "outlined"
+                        on_release: app.set_bind_mode("all")
                         MDButtonText:
-                            text: "Connect & Get IP"
+                            text: "All networks"
 
                     MDButton:
-                        style: "outlined"
-                        on_release: root.disconnect_key()
-                        MDButtonIcon:
-                            icon: "lan-disconnect"
+                        style: "filled" if root.bind_mode == "tailscale" else "outlined"
+                        on_release: app.set_bind_mode("tailscale")
                         MDButtonText:
-                            text: "Disconnect"
+                            text: "Tailscale only"
 
                     MDButton:
-                        style: "tonal"
-                        on_release: app.show_key_help_dialog()
-                        MDButtonIcon:
-                            icon: "help-circle-outline"
+                        style: "filled" if root.bind_mode == "localhost" else "outlined"
+                        on_release: app.set_bind_mode("localhost")
                         MDButtonText:
-                            text: "Help"
-
-                # In-App Key Status Details
-                MDLabel:
-                    id: ts_key_status_lbl
-                    text: root.ts_key_status_text
-                    font_style: "Label"
-                    role: "small"
-                    theme_text_color: "Custom"
-                    text_color: [0.1, 0.7, 0.35, 1] if root.is_ts_connected else [0.75, 0.45, 0.1, 1]
-                    adaptive_height: True
+                            text: "This phone"
 
             # Tailscale Hero Status Card
             MDBoxLayout:
@@ -136,7 +99,7 @@ Builder.load_string('''
 
                     MDLabel:
                         id: ts_status_lbl
-                        text: "Tailscale Mesh: Connected" if root.is_ts_connected else "Tailscale: Not Connected"
+                        text: root.state_title
                         font_style: "Title"
                         role: "medium"
                         adaptive_height: True
@@ -146,7 +109,7 @@ Builder.load_string('''
                     size_hint_x: 1
 
                 MDLabel:
-                    text: "Worldwide cross-network SMS dispatch active via Tailscale WireGuard mesh." if root.is_ts_connected else "Tailscale mesh is not active. Connect using your Key/IP above or install Tailscale to enable secure remote access anywhere."
+                    text: root.state_detail
                     font_style: "Body"
                     role: "small"
                     theme_text_color: "Secondary"
@@ -159,7 +122,7 @@ Builder.load_string('''
                     spacing: dp(4)
 
                     MDLabel:
-                        text: "Tailscale Mesh IP:" if root.is_ts_connected else "Network Status:"
+                        text: "Tailscale address:" if root.is_ts_connected else "Network status:"
                         font_style: "Label"
                         role: "small"
                         theme_text_color: "Secondary"
@@ -181,12 +144,11 @@ Builder.load_string('''
                         theme_text_color: "Secondary"
                         adaptive_height: True
 
-                # Action Buttons
-                MDBoxLayout:
-                    orientation: 'horizontal'
+                # Action Buttons (wrap on narrow phones instead of running off-screen)
+                MDGridLayout:
+                    cols: 2
                     adaptive_height: True
                     spacing: dp(8)
-                    pos_hint: {"center_x": 0.5}
 
                     MDButton:
                         style: "filled"
@@ -194,7 +156,7 @@ Builder.load_string('''
                         MDButtonIcon:
                             icon: "content-copy"
                         MDButtonText:
-                            text: "Copy Remote URL" if root.is_ts_connected else "Copy Local URL"
+                            text: "Copy URL"
 
                     MDButton:
                         style: "tonal"
@@ -202,7 +164,7 @@ Builder.load_string('''
                         MDButtonIcon:
                             icon: "download"
                         MDButtonText:
-                            text: "Get App"
+                            text: "Tailscale app"
 
                     MDButton:
                         style: "outlined"
@@ -213,6 +175,29 @@ Builder.load_string('''
                             text: "Refresh"
 
             # Cross-Network Code Generator Card
+            # Diagnostics card
+            MDBoxLayout:
+                orientation: 'vertical'
+                adaptive_height: True
+                radius: [dp(16)]
+                padding: dp(16)
+                spacing: dp(6)
+                theme_bg_color: "Custom"
+                md_bg_color: [0.08, 0.16, 0.32, 0.08] if app.theme_style == "Light" else [0.12, 0.18, 0.28, 0.5]
+
+                MDLabel:
+                    text: "Diagnostics"
+                    font_style: "Title"
+                    role: "small"
+                    adaptive_height: True
+
+                MDLabel:
+                    text: root.diagnostics_text
+                    font_style: "Body"
+                    role: "small"
+                    theme_text_color: "Secondary"
+                    adaptive_height: True
+
             MDBoxLayout:
                 orientation: 'vertical'
                 adaptive_height: True
@@ -229,11 +214,10 @@ Builder.load_string('''
                     adaptive_height: True
 
                 # Language Selector Chips
-                MDBoxLayout:
-                    orientation: 'horizontal'
+                MDGridLayout:
+                    cols: 3
                     adaptive_height: True
                     spacing: dp(6)
-                    pos_hint: {"center_x": 0.5}
 
                     MDButton:
                         id: btn_lang_curl
@@ -255,6 +239,13 @@ Builder.load_string('''
                         on_release: root.select_lang("nodejs")
                         MDButtonText:
                             text: "Node.js"
+
+                    MDButton:
+                        id: btn_lang_php
+                        style: "filled" if root.selected_lang == "php" else "outlined"
+                        on_release: root.select_lang("php")
+                        MDButtonText:
+                            text: "PHP"
 
                     MDButton:
                         id: btn_lang_go
@@ -311,102 +302,76 @@ class TailscaleBox(MDBoxLayout):
     is_ts_connected = BooleanProperty(False)
     ts_ip_text = StringProperty("Not connected")
     ts_endpoint_text = StringProperty("Endpoint: http://127.0.0.1:9292/sms/")
-    ts_key_input_text = StringProperty("")
-    ts_key_status_text = StringProperty("No In-App Key configured. Tap 'Help' for instructions.")
+    state_title = StringProperty("Tailscale: checking...")
+    state_detail = StringProperty("")
+    diagnostics_text = StringProperty("")
+    bind_mode = StringProperty("all")
+    bind_help_text = StringProperty("")
     selected_lang = StringProperty("curl")
     snippet_code = StringProperty("")
     guide_text = StringProperty(
-        "• Option 1 (In-App Key): Generate a Tailscale API Access Token or Auth Key from login.tailscale.com/admin/settings/keys, paste it above and tap Connect. OpenSMS automatically syncs your Tailnet node IP!\n\n"
-        "• Option 2 (Direct 100.x IP): If your device is on a Tailscale network, paste its 100.x.y.z IP address above.\n\n"
-        "• Option 3 (Native App): Install the Tailscale Android app and sign in. OpenSMS detects the live VPN interface automatically without configuration!"
+        "OpenSMS does not connect to Tailscale by itself and never asks for a Tailscale key.\n\n"
+        "1. Install the Tailscale app, sign in and connect.\n"
+        "2. OpenSMS shows the Tailscale address (100.x.y.z) it observes on this phone.\n"
+        "3. Call the gateway from your other devices at http://<that address>:<port>/sms/.\n"
+        "4. Choose 'Tailscale only' to keep the API off Wi-Fi/LAN.\n\n"
+        "Android allows one VPN at a time: another VPN will switch Tailscale off. "
+        "The state shown here is what this phone currently reports, not a guarantee that a remote device can reach it."
     )
+
+    _STATE_TEXT = {
+        "connected": ("Tailscale: connected",
+                      "This phone has a Tailscale address. Other devices on your tailnet can reach the gateway "
+                      "at the address below while the server is running."),
+        "other_vpn": ("Another VPN is active",
+                      "A VPN is running but it has no Tailscale address. Open the Tailscale app and connect "
+                      "(Android allows one VPN at a time)."),
+        "disconnected": ("Tailscale: not connected",
+                         "No Tailscale address found on this phone. Open the Tailscale app, sign in and connect."),
+        "unknown": ("Tailscale: status unavailable",
+                    "The network state could not be read on this device."),
+    }
+    _BIND_HELP = {
+        "all": "The API listens on every network (Wi-Fi, mobile data, Tailscale). Simple, but the API token "
+               "is sent unencrypted on Wi-Fi/LAN.",
+        "tailscale": "The API listens only on the Tailscale address. It will not start unless Tailscale is "
+                     "connected, and it never falls back to other networks.",
+        "localhost": "The API is reachable from this phone only.",
+    }
+    _LEVEL_MARK = {"ok": "[OK]", "info": "[i]", "warn": "[!]", "error": "[X]"}
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.port = 9292
         self.cached_snippets = {}
 
-    def update_tailscale_info(self, port: int = 9292, api_key: str = "YOUR_API_KEY"):
+    def update_tailscale_info(self, port: int = 9292):
+        """Refresh from what the device actually reports. The API key is never part of the snippets."""
+        from kivymd.app import MDApp
+        app = MDApp.get_running_app()
         self.port = port
-        status = TailscaleService.get_status()
+        mode = "all"
+        if app and hasattr(app, "config_template"):
+            mode = app.config_template.get("bind_mode", "all")
+        self.bind_mode = mode
+        self.bind_help_text = self._BIND_HELP.get(mode, "")
+
+        status = TailscaleService.get_status(port=port, bind_mode=mode)
         self.is_ts_connected = status["connected"]
+        title, detail = self._STATE_TEXT.get(status["state"], self._STATE_TEXT["unknown"])
+        self.state_title, self.state_detail = title, detail
 
-        # Restore input key if present in service
-        cfg_key = status.get("configured_key", "")
-        if cfg_key and not self.ts_key_input_text:
-            self.ts_key_input_text = cfg_key
-
-        if self.is_ts_connected and status["ip"]:
+        endpoint, net_type = TailscaleService.get_preferred_endpoint(port, mode)
+        if status["connected"] and status["ip"]:
             self.ts_ip_text = status["ip"]
-            endpoint = f"http://{status['ip']}:{port}/sms/"
-            self.ts_endpoint_text = f"Remote Mesh Endpoint: {endpoint}"
-            mode_str = status.get("mode", "connected").replace("_", " ").title()
-            node = status.get("node_name", "gateway")
-            self.ts_key_status_text = f"Connected ({mode_str}): Node '{node}' • {status['ip']}"
         else:
-            local_ip = status.get("local_ip") or "127.0.0.1"
-            self.ts_ip_text = f"Not detected (Local Wi-Fi / LAN: {local_ip})"
-            endpoint = f"http://{local_ip}:{port}/sms/"
-            self.ts_endpoint_text = f"Local LAN Endpoint: {endpoint}"
-            self.ts_key_status_text = "Tailscale not connected. Enter Key or IP above to connect."
+            self.ts_ip_text = f"Not detected (local address: {status.get('local_ip') or '127.0.0.1'})"
+        self.ts_endpoint_text = f"{net_type} endpoint: {endpoint}"
+        self.diagnostics_text = "\n".join(
+            f"{self._LEVEL_MARK.get(d['level'], '[i]')} {d['text']}" for d in status["diagnostics"])
 
-        self.cached_snippets = TailscaleService.generate_code_snippets(endpoint, api_key=api_key)
+        self.cached_snippets = TailscaleService.generate_code_snippets(endpoint)
         self.snippet_code = self.cached_snippets.get(self.selected_lang, "")
-
-    def connect_key(self):
-        from kivymd.app import MDApp
-        app = MDApp.get_running_app()
-        raw_key = self.ids.ts_key_inp.text.strip()
-        if not raw_key:
-            if app and hasattr(app, "show_toast_msg"):
-                app.show_toast_msg("Please enter an API Token, Auth Key, or Tailscale IP.", is_error=True)
-            return
-
-        if app and hasattr(app, "show_toast_msg"):
-            app.show_toast_msg("Connecting to Tailscale...")
-
-        def worker():
-            res = TailscaleService.connect_tailscale_key(raw_key)
-
-            def on_finish(dt):
-                if res.get("success"):
-                    if app and hasattr(app, "save_tailscale_config"):
-                        app.save_tailscale_config(
-                            key=raw_key,
-                            ip=res.get("ip"),
-                            node_name=res.get("node_name", "opensms-node"),
-                            mode=res.get("mode", "configured")
-                        )
-                    port = app.req_template.get("port", 9292) if app else 9292
-                    self.update_tailscale_info(port=port)
-                    if app and hasattr(app, "update_network_addresses"):
-                        app.update_network_addresses()
-                    if app and hasattr(app, "show_toast_msg"):
-                        app.show_toast_msg(res.get("message", "Tailscale connected!"))
-                else:
-                    err = res.get("error", "Failed to connect to Tailscale.")
-                    self.ts_key_status_text = f"Connection failed: {err}"
-                    if app and hasattr(app, "show_toast_msg"):
-                        app.show_toast_msg(err, is_error=True)
-
-            Clock.schedule_once(on_finish)
-
-        Thread(target=worker, daemon=True).start()
-
-    def disconnect_key(self):
-        from kivymd.app import MDApp
-        app = MDApp.get_running_app()
-        TailscaleService.disconnect_key()
-        self.ids.ts_key_inp.text = ""
-        self.ts_key_input_text = ""
-        if app and hasattr(app, "clear_tailscale_config"):
-            app.clear_tailscale_config()
-        port = app.req_template.get("port", 9292) if app else 9292
-        self.update_tailscale_info(port=port)
-        if app and hasattr(app, "update_network_addresses"):
-            app.update_network_addresses()
-        if app and hasattr(app, "show_toast_msg"):
-            app.show_toast_msg("Tailscale key disconnected.")
 
     def select_lang(self, lang: str):
         self.selected_lang = lang
@@ -415,12 +380,8 @@ class TailscaleBox(MDBoxLayout):
     def copy_mesh_endpoint(self):
         from kivymd.app import MDApp
         app = MDApp.get_running_app()
-        status = TailscaleService.get_status()
-        if status["connected"] and status["ip"]:
-            url = f"http://{status['ip']}:{self.port}/sms/"
-        else:
-            local_ip = status.get("local_ip") or "127.0.0.1"
-            url = f"http://{local_ip}:{self.port}/sms/"
+        mode = app.config_template.get("bind_mode", "all") if app else "all"
+        url, _ = TailscaleService.get_preferred_endpoint(self.port, mode)
         Clipboard.copy(url)
         if app and hasattr(app, "show_toast_msg"):
             app.show_toast_msg(f"Copied endpoint: {url}")
@@ -434,9 +395,18 @@ class TailscaleBox(MDBoxLayout):
                 app.show_toast_msg(f"Copied {self.selected_lang.upper()} snippet!")
 
     def refresh_status(self):
+        """Re-read the network state off the UI thread (includes a short TCP self-probe)."""
         from kivymd.app import MDApp
         app = MDApp.get_running_app()
         port = app.req_template.get("port", 9292) if app else 9292
+        mode = app.config_template.get("bind_mode", "all") if app else "all"
+
+        def worker():
+            status = TailscaleService.get_status(port=port, bind_mode=mode, probe=True)
+            Clock.schedule_once(lambda dt: self._apply_probe(status, port), 0)
+        Thread(target=worker, daemon=True).start()
+
+    def _apply_probe(self, status, port):
         self.update_tailscale_info(port=port)
-        if app and hasattr(app, "show_toast_msg"):
-            app.show_toast_msg("Network & Tailscale status refreshed.")
+        self.diagnostics_text = "\n".join(
+            f"{self._LEVEL_MARK.get(d['level'], '[i]')} {d['text']}" for d in status["diagnostics"])

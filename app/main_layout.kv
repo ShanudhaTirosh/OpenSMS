@@ -3,6 +3,9 @@
 #:import SettingsBox screens.settings.SettingsBox
 #:import LogBox screens.logs.LogBox
 #:import TailscaleBox screens.tailscaleScr.TailscaleBox
+#:import MessagesBox screens.messages.MessagesBox
+#:import ApiKeysBox screens.apiKeys.ApiKeysBox
+#:import SystemBox screens.system.SystemBox
 
 <BaseMDNavigationItem>
     MDNavigationItemIcon:
@@ -63,6 +66,31 @@ MDScreen:
                             padding: 8, 2, 8, (main_scr_box.bottom_pad + btm_nav_bar.height + 2)
 
                     MDScreen:
+                        name: "Messages"
+                        on_enter: app.on_messages_entry()
+                        on_enter: messages_scr.start_auto_refresh()
+                        on_leave: messages_scr.stop_auto_refresh()
+                        MessagesBox:
+                            id: messages_scr
+                            padding: 8, 2, 8, (main_scr_box.bottom_pad + btm_nav_bar.height + 2)
+
+                    MDScreen:
+                        name: "API"
+                        on_enter: app.on_api_entry()
+                        on_enter: api_scr.reload()
+                        ApiKeysBox:
+                            id: api_scr
+                            padding: 8, 2, 8, (main_scr_box.bottom_pad + btm_nav_bar.height + 2)
+
+                    MDScreen:
+                        name: "System"
+                        on_enter: app.on_system_entry()
+                        on_enter: system_scr.refresh()
+                        SystemBox:
+                            id: system_scr
+                            padding: 8, 2, 8, (main_scr_box.bottom_pad + btm_nav_bar.height + 2)
+
+                    MDScreen:
                         name: "Mesh"
                         on_enter: app.on_tailscale_screen_entry()
                         TailscaleBox:
@@ -98,6 +126,27 @@ MDScreen:
                                 icon: "cellphone-wireless"
                             MDNavigationDrawerItemText:
                                 text: "SMS Gateway"
+
+                        MDNavigationDrawerItem:
+                            on_release: app.go_to_screen("Messages")
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "message-text-outline"
+                            MDNavigationDrawerItemText:
+                                text: "Messages"
+
+                        MDNavigationDrawerItem:
+                            on_release: app.go_to_screen("API")
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "key-outline"
+                            MDNavigationDrawerItemText:
+                                text: "API Keys"
+
+                        MDNavigationDrawerItem:
+                            on_release: app.go_to_screen("System")
+                            MDNavigationDrawerItemLeadingIcon:
+                                icon: "stethoscope"
+                            MDNavigationDrawerItemText:
+                                text: "System & diagnostics"
 
                         MDNavigationDrawerItem:
                             on_release: app.goto_tailscale_screen()
@@ -169,6 +218,14 @@ MDScreen:
                     icon: "cellphone-wireless"
                     text: "SMS"
                     active: True
+
+                BaseMDNavigationItem
+                    icon: "message-text-outline"
+                    text: "Messages"
+
+                BaseMDNavigationItem
+                    icon: "key-outline"
+                    text: "API"
 
                 BaseMDNavigationItem
                     icon: "shield-account-outline"

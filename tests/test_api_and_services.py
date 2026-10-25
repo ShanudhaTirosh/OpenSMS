@@ -1,6 +1,5 @@
 import os
 import sys
-import tempfile
 import json
 import pytest
 from pathlib import Path
@@ -14,7 +13,6 @@ from services.postApi import (
     set_config_path,
     generate_new_api_key,
     get_api_keys,
-    hash_api_key,
     SmsData,
     BatchSmsData,
     FAILED_AUTH_ATTEMPTS
@@ -48,8 +46,10 @@ def test_api_key_generation_and_verification():
     assert raw_key.startswith("osms_")
     keys = get_api_keys()
     assert len(keys) == 1
-    hashed = hash_api_key(raw_key)
-    assert hashed in keys
+    import services.postApi as post_mod
+    assert post_mod.db_mgr.verify_api_key(raw_key) is not None
+    # SQLite is the single source of truth: no plaintext/legacy key file is written
+    assert not (Path(post_mod.config_dir) / "keys.json").exists()
 
 def test_unauthenticated_sms_fails():
     response = client.post("/sms/", json={"number": "+1234567890", "text": "Test"})
@@ -208,7 +208,7 @@ def test_tailscale_service_snippets():
     assert "http://100.85.12.34:9292/sms/" in snippets["python"]
 
 def test_batch_sms_max_limit():
-    from services.postApi import BatchSmsData, SmsData
+    from services.postApi import SmsData
     valid_msgs = [SmsData(number="+1234567890", text="Test") for _ in range(5)]
     batch = BatchSmsData(messages=valid_msgs)
     assert len(batch.messages) == 5
@@ -263,103 +263,26 @@ def test_tailscale_endpoint_fallback_never_none(monkeypatch):
     assert endpoint == "http://127.0.0.1:9292/sms/"
     assert "None" not in endpoint
 
-def test_rate_limiting_with_forwarded_for():
-    # Failed auth using X-Forwarded-For header
-    proxy_ip = "203.0.113.195"
-    for _ in range(10):
+def test_rate_limiting_ignores_forwarded_for():
+    # X-Forwarded-For is attacker-controlled: rotating it must NOT evade the lockout (SEC-03)
+    for i in range(10):
         client.post(
             "/sms/",
-            headers={"Authorization": "Bearer bad-key", "X-Forwarded-For": proxy_ip},
+            headers={"Authorization": "Bearer bad-key", "X-Forwarded-For": f"203.0.113.{i}"},
             json={"number": "+1234567890", "text": "Test"}
         )
-
-    # 11th request from this forwarded IP should be rate-limited
     res = client.post(
         "/sms/",
-        headers={"Authorization": "Bearer bad-key", "X-Forwarded-For": proxy_ip},
+        headers={"Authorization": "Bearer bad-key", "X-Forwarded-For": "198.51.100.77"},
         json={"number": "+1234567890", "text": "Test"}
     )
     assert res.status_code == 429
 
-def test_tailscale_direct_ip_connection():
-    from services.tailscaleSvc import TailscaleService
-    TailscaleService.disconnect_key()
-    res = TailscaleService.connect_tailscale_key("100.88.99.100")
-    assert res["success"] is True
-    assert res["ip"] == "100.88.99.100"
+# (removed in audit Stage 5: asserted the fake in-app Tailscale 'connect' behaviour; see tests/test_stage5_tailscale.py)
 
-    status = TailscaleService.get_status()
-    assert status["connected"] is True
-    assert status["ip"] == "100.88.99.100"
+# (removed in audit Stage 5: asserted the fake in-app Tailscale 'connect' behaviour; see tests/test_stage5_tailscale.py)
 
-    endpoint, net_type = TailscaleService.get_preferred_endpoint(9292)
-    assert endpoint == "http://100.88.99.100:9292/sms/"
-    assert net_type == "Tailscale Mesh"
-
-    # Cleanup
-    TailscaleService.disconnect_key()
-
-def test_tailscale_invalid_inputs():
-    from services.tailscaleSvc import TailscaleService
-    TailscaleService.disconnect_key()
-
-    res_empty = TailscaleService.connect_tailscale_key("")
-    assert res_empty["success"] is False
-
-    res_invalid = TailscaleService.connect_tailscale_key("not-a-valid-key-or-ip")
-    assert res_invalid["success"] is False
-    assert "Unrecognized" in res_invalid["error"]
-
-def test_tailscale_api_token_connection(monkeypatch):
-    from services.tailscaleSvc import TailscaleService
-    TailscaleService.disconnect_key()
-
-    class MockResponse:
-        status_code = 200
-        def json(self):
-            return {
-                "devices": [
-                    {
-                        "id": "1",
-                        "name": "my-pc.tailnet.ts.net",
-                        "hostname": "my-pc",
-                        "addresses": ["100.64.1.2"],
-                        "os": "windows",
-                        "online": True
-                    },
-                    {
-                        "id": "2",
-                        "name": "pixel-phone.tailnet.ts.net",
-                        "hostname": "pixel-phone",
-                        "addresses": ["100.105.20.30"],
-                        "os": "android",
-                        "online": True
-                    }
-                ]
-            }
-
-    import requests
-    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockResponse())
-
-    res = TailscaleService.connect_tailscale_key("tskey-api-test-token-12345678901234567890")
-    assert res["success"] is True
-    # Should pick android device
-    assert res["ip"] == "100.105.20.30"
-    assert "pixel-phone" in res["node_name"]
-
-    conf = TailscaleService.get_config_dict()
-    assert conf["connected"] is True
-    assert conf["ip"] == "100.105.20.30"
-
-    # Test restoring configuration
-    TailscaleService.disconnect_key()
-    assert TailscaleService.get_status()["connected"] is False
-
-    TailscaleService.init_config({"tailscale": conf})
-    assert TailscaleService.get_status()["connected"] is True
-    assert TailscaleService.get_status()["ip"] == "100.105.20.30"
-
-    TailscaleService.disconnect_key()
+# (removed in audit Stage 5: asserted the fake in-app Tailscale 'connect' behaviour; see tests/test_stage5_tailscale.py)
 
 def test_db_manager_crud_and_metrics(tmp_path):
     from services.dbMgr import DatabaseManager
@@ -382,15 +305,16 @@ def test_db_manager_crud_and_metrics(tmp_path):
     db.update_message_status(msg_id, "sent")
     updated = db.get_message(msg_id)
     assert updated["status"] == "sent"
-    assert updated["delivered_at"] is not None
+    # "sent" is only a hand-off to the telephony layer, never a delivery confirmation (SMS-01)
+    assert updated["delivered_at"] is None
+    db.update_message_status(msg_id, "delivered")
+    assert db.get_message(msg_id)["delivered_at"] is not None
 
     metrics = db.get_metrics()
     assert metrics["sent_today"] >= 1
     assert metrics["success_rate"] == 100.0
 
 def test_db_manager_multi_key():
-    from services.dbMgr import DatabaseManager
-    from services.postApi import set_config_path
     raw_key = "osms_test_key_abc_123456"
     raw_key2 = "osms_test_key_xyz_789012"
 
@@ -398,7 +322,7 @@ def test_db_manager_multi_key():
     db = post_mod.db_mgr
 
     id1 = db.add_api_key(raw_key, name="Home Assistant", scopes=["sms:write"])
-    id2 = db.add_api_key(raw_key2, name="Grafana Alerts", scopes=["sms:read"])
+    db.add_api_key(raw_key2, name="Grafana Alerts", scopes=["sms:read"])
 
     v1 = db.verify_api_key(raw_key)
     assert v1 is not None
@@ -535,18 +459,15 @@ def test_update_manager_check_and_download(tmp_path, monkeypatch):
     inst_res = UpdateManager.install_apk(dest_file)
     assert inst_res["success"] is True
 
-def test_ai_doc_endpoints():
-    res_llms = client.get("/llms.txt")
-    assert res_llms.status_code == 200
-    assert "OpenSMS" in res_llms.text
-
-    res_md = client.get("/docs/markdown")
-    assert res_md.status_code == 200
-    assert "OpenSMS" in res_md.text
-
-    res_ai = client.get("/docs/ai")
-    assert res_ai.status_code == 200
-    assert "OpenSMS" in res_ai.text
-
-
-
+def test_ai_doc_endpoints_require_auth_by_default():
+    for path in ("/llms.txt", "/docs/markdown", "/docs/ai"):
+        assert client.get(path).status_code == 401
+    key = generate_new_api_key()
+    h = {"Authorization": f"Bearer {key}"}
+    for path in ("/llms.txt", "/docs/markdown", "/docs/ai"):
+        res = client.get(path, headers=h)
+        assert res.status_code == 200
+        assert "OpenSMS" in res.text
+    # interactive docs / openapi are disabled unless OPENSMS_PUBLIC_DOCS=1
+    assert client.get("/docs").status_code == 404
+    assert client.get("/openapi.json").status_code == 404

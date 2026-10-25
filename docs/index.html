@@ -282,7 +282,7 @@
           <div class="code-header"><span>HTTP Header</span></div>
           <pre><code>Authorization: Bearer osms_your_secret_api_key</code></pre>
         </div>
-        <p><strong>Brute-Force Rate Limiting:</strong> A maximum of 5 failed authentication attempts per IP address is permitted within a 60-second sliding window. Exceeding this returns HTTP <code>429 Too Many Requests</code>.</p>
+        <p><strong>Brute-Force Rate Limiting:</strong> A maximum of 10 failed authentication attempts per client address is permitted within a 60-second sliding window (the socket address is used; X-Forwarded-For is ignored). Each API key may also send at most 300 messages per minute. Exceeding this returns HTTP <code>429 Too Many Requests</code>.</p>
       </section>
 
       <!-- POST /sms/ -->
@@ -307,7 +307,7 @@
         <div class="code-container">
           <div class="code-header"><span>Example Response (200 OK)</span><button class="copy-btn">Copy</button></div>
           <pre><code>{
-  "id": "msg_9f3b81ca7d2e4018",
+  "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
   "number": "+1234567890",
   "stat": true,
   "sim_slot": 0,
@@ -339,12 +339,12 @@
       <section class="doc-section" id="endpoint-status">
         <div class="endpoint-badge method-get">GET /sms/{id}</div>
         <h2>Get SMS Delivery Status by ID</h2>
-        <p>Retrieves persistent message lifecycle status (<code>queued</code>, <code>sending</code>, <code>sent</code>, <code>failed</code>), timestamps, and cellular carrier error details from SQLite.</p>
+        <p>Retrieves persistent message lifecycle status (<code>queued</code>, <code>submitted</code>, <code>sent</code>, <code>delivered</code>, <code>failed</code>, <code>unknown</code>), timestamps, and cellular carrier error details from SQLite.</p>
 
         <div class="code-container">
           <div class="code-header"><span>Response (200 OK)</span><button class="copy-btn">Copy</button></div>
           <pre><code>{
-  "id": "msg_9f3b81ca7d2e4018",
+  "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
   "recipient": "+1234567890",
   "text": "Hello from OpenSMS!",
   "encoding": "GSM-7",

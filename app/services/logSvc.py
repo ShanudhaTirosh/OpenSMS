@@ -1,5 +1,43 @@
 from datetime import datetime
 import os
+import re
+import queue
+import threading
+
+
+def mask_phone(number: str) -> str:
+    """Mask a phone number for logs: keep the first 3 and last 3 characters (audit issue SEC-10)."""
+    n = re.sub(r"[^\d+]", "", str(number or ""))
+    if len(n) <= 6:
+        return "***"
+    return n[:3] + "*" * (len(n) - 6) + n[-3:]
+
+
+class AsyncLogWriter:
+    """Single background worker so request handlers never spawn a thread per log line."""
+
+    def __init__(self, maxsize: int = 1000):
+        self._q: "queue.Queue[tuple]" = queue.Queue(maxsize=maxsize)
+        self._thread = None
+        self._lock = threading.Lock()
+
+    def submit(self, log_service, message: str) -> None:
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, daemon=True)
+                self._thread.start()
+        try:
+            self._q.put_nowait((log_service, message))
+        except queue.Full:
+            pass  # drop rather than block the request or grow without bound
+
+    def _run(self):
+        while True:
+            svc, msg = self._q.get()
+            try:
+                svc.write_log(msg)
+            except Exception as e:
+                print(f"Error writing log: {e}")
 
 class LogService:
 

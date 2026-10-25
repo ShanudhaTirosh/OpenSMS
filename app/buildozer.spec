@@ -38,13 +38,13 @@ source.exclude_dirs = tests, logs, bin, venv, build, dist, patches, .venv, venv,
 
 # (str) Application versioning (method 2)
 version.regex = __version__ = ['"](.*)['"]
-version.filename = %(source.dir)s/main.py
+version.filename = %(source.dir)s/app_version.py
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
 requirements = python3, 
     kivy, 
-    https://github.com/kivymd/KivyMD/archive/master.zip, 
+    https://github.com/kivymd/KivyMD/archive/67c7941f6e1599540abd49d356291ede2647549d.zip, 
     materialyoucolor==3.0.3, 
     materialshapes, 
     pycairo, 
@@ -59,21 +59,23 @@ requirements = python3,
     plyer==2.1.0, 
     Pygments, 
     requests,
-    annotated-doc, 
-    annotated-types, 
+    annotated-doc==0.0.5, 
+    annotated-types==0.8.0, 
     pydantic-core,
     pydantic==2.12.3,
     idna,
-    anyio,
-    starlette,
+    anyio==4.15.1,
+    starlette==1.9.0,
     typing-extensions,
-    typing-inspection,
-    opentelemetry-api,
-    fastapi,
-    click,
-    h11,
-    uvicorn
-# pydantic==2.12.3, opentelemetry-api, fastapi==0.143.0, flask
+    typing-inspection==0.4.4,
+    opentelemetry-api==1.45.1,
+    fastapi==0.162.0,
+    click==8.5.0,
+    h11==0.16.0,
+    uvicorn==0.34.3
+# Versions above are the set the test suite runs against (see app/constraints.txt). pydantic must stay at
+# 2.12.3 to match the local pydantic-core recipe. Packages with p4a recipes (requests, idna, ...) are left
+# unpinned on purpose: a version pin can bypass the recipe.
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
@@ -96,7 +98,7 @@ orientation = all
 # launched. This is optionally followed by ":foreground" for foreground services or
 # ":foreground:sticky" for sticky foreground services. The default is a background service.
 # Bound services are not supported.
-services = opensmssvc:services/appSvc.py:foreground:foregroundServiceType=dataSync
+services = opensmssvc:services/appSvc.py:foreground:sticky:foregroundServiceType=specialUse
 
 #
 # OSX Specific
@@ -134,7 +136,7 @@ icon.adaptive_background.filename = %(source.dir)s/data/images/icon_bg.png
 
 # (list) Permissions
 # (See https://python-for-android.readthedocs.io/en/latest/buildoptions.html for all the supported syntaxes and properties)
-android.permissions = android.permission.INTERNET, android.permission.SEND_SMS, android.permission.WAKE_LOCK, android.permission.FOREGROUND_SERVICE, android.permission.FOREGROUND_SERVICE_DATA_SYNC, android.permission.POST_NOTIFICATIONS, android.permission.REQUEST_INSTALL_PACKAGES
+android.permissions = android.permission.INTERNET, android.permission.SEND_SMS, android.permission.READ_PHONE_STATE, android.permission.ACCESS_NETWORK_STATE, android.permission.WAKE_LOCK, android.permission.FOREGROUND_SERVICE, android.permission.FOREGROUND_SERVICE_SPECIAL_USE, android.permission.POST_NOTIFICATIONS, android.permission.REQUEST_INSTALL_PACKAGES
 
 # (list) features (adds uses-feature -tags to manifest)
 #android.features = android.hardware.usb.host
@@ -216,7 +218,7 @@ android.accept_sdk_license = True
 
 # (list) List of Java files to add to the android project (can be java or a
 # directory containing the files)
-#android.add_src =
+android.add_src = java_src
 
 # (list) Android AAR archives to add
 #android.add_aars =
@@ -328,8 +330,8 @@ android.archs = armeabi-v7a, arm64-v8a
 # this is not the same as app version and should only be edited if you know what you're doing
 # android.numeric_version = 1
 
-# (bool) enables Android auto backup feature (Android API >=23)
-android.allow_backup = True
+# (bool) enables Android auto backup feature (Android API >=23). Disabled: config/ and opensms.db hold message bodies and settings (audit SEC-05)
+android.allow_backup = False
 
 # (str) XML file for custom backup rules (see official auto backup documentation)
 # android.backup_rules =
@@ -344,7 +346,7 @@ android.allow_backup = True
 # android.no-byte-compile-python = False
 
 # (str) The format used to package the app for release mode (aab or apk or aar).
-android.release_artifact = aab
+android.release_artifact = apk
 
 # (str) The format used to package the app for debug mode (apk or aar).
 # android.debug_artifact = apk

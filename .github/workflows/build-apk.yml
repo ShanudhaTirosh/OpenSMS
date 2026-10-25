@@ -7,9 +7,14 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   ANDROID_API_LEVEL: '24'
   ANDROID_MINAPI: '24'
+  # python-for-android fork pinned to a commit (was: moving `develop` branch) - update deliberately
+  P4A_FORK_REF: 1d2d53739100eac44a310be1204249e1a695e70b
 
 jobs:
   build:
@@ -44,21 +49,31 @@ jobs:
             zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 \
             cmake libffi-dev libssl-dev ccache libjpeg-dev libcairo2-dev
 
+      # A debug build is signed with ~/.android/debug.keystore, which is generated fresh on every new runner.
+      # Caching it keeps the debug signature stable across runs so test builds install OVER each other
+      # (without it Android refuses: "App not installed - conflicts with an existing package").
+      # This is for testing only; releases use the real release key (see release.yml).
+      - name: Cache debug keystore (stable debug signature for test installs)
+        uses: actions/cache@v4
+        with:
+          path: ~/.android
+          key: debug-keystore-v1-${{ github.repository }}
+
       - name: Cache Buildozer global directories
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             ~/.gradle
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('app/buildozer.spec', 'app/req_android.txt', 'app/p4a_local_recipes/**') }}
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('app/buildozer.spec', 'app/requirements*.txt', 'app/p4a_local_recipes/**', 'app/java_src/**') }}
           restore-keys: |
             ${{ runner.os }}-buildozer-
 
       - name: Install Python build tools and dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install Cython==0.29.36 buildozer pytest httpx
-          pip install -r app/req_android.txt
+          pip install Cython==0.29.36 buildozer pytest httpx pyyaml
+          pip install -r app/req_android.txt -c app/constraints.txt
 
       - name: Run automated test suite
         run: |
@@ -68,7 +83,8 @@ jobs:
         run: |
           mkdir -p app/.buildozer/android/platform
           if [ ! -d "app/.buildozer/android/platform/python-for-android" ]; then
-            git clone --depth 1 -b develop https://github.com/daslearning-org/p4a-unofficial.git app/.buildozer/android/platform/python-for-android
+            git clone https://github.com/daslearning-org/p4a-unofficial.git app/.buildozer/android/platform/python-for-android
+            git -C app/.buildozer/android/platform/python-for-android checkout "$P4A_FORK_REF"
           fi
           python3 app/patch_p4a.py app/.buildozer/android/platform/python-for-android
 
@@ -81,6 +97,10 @@ jobs:
           export ANDROID_API_LEVEL=24
           export ANDROID_MINAPI=24
           buildozer android debug
+
+      - name: Show APK checksums
+        run: |
+          cd app/bin && sha256sum *.apk | tee "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

@@ -20,8 +20,9 @@ API tokens are cryptographically generated (prefix `osms_...`) and hashed with S
 
 ### Rate Limiting & Protection
 - To protect against brute-force attacks on cellular hardware, the gateway enforces IP rate-limiting on failed authentication attempts.
-- **Limit**: Maximum 5 failed authorization attempts per IP within a 60-second sliding window.
-- **Response**: HTTP `429 Too Many Requests` with `{"detail": "Rate limit exceeded. Try again in 60s."}`.
+- **Limit**: 10 failed authorization attempts per client address within a 60-second sliding window. The address is the socket peer; `X-Forwarded-For` is ignored.
+- **Response**: HTTP `429 Too Many Requests` with `Retry-After: 60`.
+- **Send limit**: separately, each API key may send at most 300 messages per minute (`429` `send_rate_limited` with `Retry-After`).
 
 ---
 
@@ -58,19 +59,26 @@ Authorization: Bearer osms_your_secret_key
 #### Response (`200 OK`)
 ```json
 {
-  "id": "msg_9f3b81ca7d2e4018",
-  "number": "+1234567890",
   "stat": true,
-  "sim_slot": 0,
+  "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
+  "status": "submitted",
+  "delivery_confirmed": false,
+  "message": "SMS submitted to the telephony service for +1234567890 (delivery not confirmed)",
+  "recipient": "+1234567890",
   "segments": 1,
   "encoding": "GSM-7"
 }
 ```
+`stat: true` means the message was accepted and handed to Android. It never means delivered. If the send worker is busy for more than 15 seconds the response is `202 Accepted` with `"status": "queued"`; poll `GET /sms/{id}`. Send an `Idempotency-Key` header to make retries safe (see below).
 
 #### Error Responses
-- `400 Bad Request`: `{"detail": "Invalid phone number format. Must contain 7 to 15 digits."}`
-- `401 Unauthorized`: `{"detail": "Invalid or missing Bearer API key"}`
-- `500 Internal Server Error`: `{"detail": "Carrier error: cellular modem failed to transmit message"}`
+Every error has the legacy `detail` field plus `error: {code, message}`.
+- `401 Unauthorized` (`unauthorized`): missing or invalid API key.
+- `403 Forbidden` (`insufficient_scope`): the key lacks `sms:write`.
+- `422 Unprocessable Entity` (`validation_error` / `invalid_sim_slot` / `idempotency_key_reuse`): invalid number, text over 1600 characters, inactive SIM slot, reused idempotency key with a different body.
+- `429 Too Many Requests` (`rate_limited` / `send_rate_limited`): too many failed authentications, or the per-key send limit; see `Retry-After`.
+- `502 Bad Gateway` (`delivery_failed`): the hand-off to the telephony layer failed; the reason is in `detail`.
+- `503 Service Unavailable` (`queue_full`): the send queue is full; retry after `Retry-After`.
 
 ---
 
@@ -137,12 +145,12 @@ Retrieves the persistent delivery status and lifecycle metadata for a previously
 #### Path Parameters
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `id` | string | **Yes** | The message ID returned by `POST /sms/` (e.g. `msg_9f3b81ca7d2e4018`). |
+| `id` | string | **Yes** | The message ID returned by `POST /sms/` (a UUID). |
 
 #### Response (`200 OK`)
 ```json
 {
-  "id": "msg_9f3b81ca7d2e4018",
+  "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
   "recipient": "+1234567890",
   "text": "Your verification code is 849201.",
   "encoding": "GSM-7",
@@ -151,16 +159,18 @@ Retrieves the persistent delivery status and lifecycle metadata for a previously
   "status": "sent",
   "batch_id": null,
   "created_at": 1729432800.12,
-  "delivered_at": 1729432801.45,
-  "carrier_error": null
+  "updated_at": 1729432801.45,
+  "delivered_at": null,
+  "carrier_error": null,
+  "provider": "android",
+  "parts_expected": 1,
+  "parts": [{"part": 0, "sent_ok": 1, "sent_error": null, "delivery": null, "updated_at": 1729432801.45}],
+  "delivery_confirmed": false
 }
 ```
 
 #### Message Status Values
-- `queued`: Message stored in database, awaiting baseband pickup.
-- `sending`: Handed over to Android native `SmsManager`.
-- `sent`: Successfully acknowledged by carrier cellular tower.
-- `failed`: Baseband error (e.g. no signal, SIM disabled, carrier rejected).
+See **Message lifecycle** at the end of this document: `queued`, `submitted`, `sent`, `delivered`, `failed`, `unknown`. Only `delivered` (with `delivered_at` set) is a delivery confirmation.
 
 ---
 
@@ -187,7 +197,7 @@ Retrieves paginated historical SMS messages with status filtering and text searc
   "limit": 50,
   "messages": [
     {
-      "id": "msg_9f3b81ca7d2e4018",
+      "id": "3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42",
       "recipient": "+1234567890",
       "text": "Alert: Sensor threshold exceeded",
       "status": "sent",
@@ -195,7 +205,7 @@ Retrieves paginated historical SMS messages with status filtering and text searc
       "segments": 1,
       "sim_slot": 0,
       "created_at": 1729432800.12,
-      "delivered_at": 1729432801.45
+      "delivered_at": null
     }
   ]
 }
@@ -307,3 +317,55 @@ OpenSMS automatically detects character encoding and divides long messages using
 |---|---|---|---|
 | **GSM 7-bit** | 160 characters | 153 characters / segment | Standard ASCII characters, numbers, and basic punctuation. |
 | **UCS-2 (Unicode)** | 70 characters | 67 characters / segment | Triggered when text contains emojis, non-Latin alphabets (Arabic, Cyrillic, Chinese, Sinhala, etc.), or special Unicode symbols. |
+
+
+---
+
+## Authentication scopes, key management and delivery semantics (audit update)
+
+| Scope | Allows |
+|---|---|
+| `sms:write` | `POST /sms/`, `POST /sms/batch/` |
+| `sms:read` | `GET /sms/{id}`, `GET /sms/history`, `GET /system/*`, docs endpoints |
+| `admin` | everything above plus `GET/POST /keys/`, `DELETE /keys/{id}`, `POST /control/` |
+
+A key lacking the scope receives `403`. Send requests over the per-key rate limit receive `429` with `Retry-After`.
+
+**Delivery status.** `status: "sent"` means the message was handed to Android's telephony service. It is **not** a delivery confirmation: `delivery_confirmed` is `false` and `delivered_at` is `null`. Carrier delivery reports are not yet tracked.
+
+`/docs`, `/openapi.json`, `/llms.txt` and `/docs/markdown` require a Bearer token unless the gateway is started with `OPENSMS_PUBLIC_DOCS=1`.
+
+
+## Idempotency, errors and pagination (audit Stage 3)
+
+**Idempotency.** Add `Idempotency-Key: <unique string>` (1-128 chars of `A-Z a-z 0-9 _ - . :`) to `POST /sms/` or `POST /sms/batch/`. Retrying after a timeout with the same key and body returns the original response with `Idempotent-Replay: true` and does not send again.
+
+| Situation | Result |
+|---|---|
+| Same key, same body, finished | original response, `Idempotent-Replay: true` |
+| Same key, same body, still running | `409` `request_in_progress` (`Retry-After: 2`) |
+| Same key, different body | `422` `idempotency_key_reuse` |
+| Previous attempt failed (e.g. `502`) | key is released; retry runs normally |
+| Malformed key | `400` `invalid_idempotency_key` |
+
+Keys are scoped to the API key and expire after 24 hours.
+
+**Errors.** Every error body is `{"detail": ..., "error": {"code": "...", "message": "..."}}`. `detail` is unchanged from earlier versions.
+
+**Pagination.** `GET /sms/history` returns `count` (rows in this page), `total` (rows matching the filters), `offset`, `limit` and `has_more`. `limit` is 1-200.
+
+
+## Message lifecycle (audit Stage 4)
+
+| `status` | Meaning | Evidence |
+|---|---|---|
+| `queued` | Accepted by the API, waiting for the send worker | - |
+| `submitted` | Handed to Android's telephony layer; radio result not known yet | `SmsManager` call returned |
+| `sent` | The radio/network accepted **every** part | sent receipts |
+| `delivered` | The handset/recipient reported delivery for **every** part | delivery status reports |
+| `failed` | Rejected at submit, by the radio, or a failed delivery report; see `carrier_error` | - |
+| `unknown` | Submitted but no result ever arrived (e.g. the gateway restarted). It may or may not have been sent and is never re-sent automatically | - |
+
+`delivered_at` and `delivery_confirmed: true` appear only with a real delivery report. Carrier support for delivery reports varies; without one a message stays at `sent`.
+
+`POST /sms/` returns `200` after the hand-off (`status: submitted` or `sent`), `202` (`status: queued`) if the worker is still busy after `OPENSMS_SUBMIT_WAIT_SECONDS` (default 15), `502 delivery_failed` if the hand-off failed (the reason is in `detail`), `503 queue_full` if the queue is full and `422 invalid_sim_slot` for an inactive SIM. `POST /sms/batch/` returns per-message `status` and a `pending` count. `GET /system/sims/` returns `reliable` (false when Android could not be asked, usually because the Phone permission is missing; the single entry is then a placeholder and `sim_slot` routing is refused with `422 invalid_sim_slot`). `GET /sms/{id}` adds `parts` (per-part `sent_ok`, `sent_error`, `delivery`), `provider` (`android` or `simulated`) and `delivery_confirmed`.

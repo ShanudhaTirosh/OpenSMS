@@ -1,0 +1,13 @@
+# Conservative lint: syntax errors and pyflakes only (unused/undefined names, bad f-strings, ...).
+# Style rules are intentionally not enforced.
+target-version = "py311"
+extend-exclude = ["app/.buildozer", "app/bin", "app/p4a_local_recipes"]
+
+[lint]
+select = ["E9", "F"]
+
+[lint.per-file-ignores]
+# Kivy/KivyMD: importing a widget class registers it with the Factory for use in .kv files, so a
+# "pointless" import is often required. Unused locals in main.py are widget lookups kept for clarity.
+"app/main.py" = ["F401", "F841"]
+"app/screens/*.py" = ["F401"]

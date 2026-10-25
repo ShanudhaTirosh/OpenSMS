@@ -1,5 +1,3 @@
-fastapi>=0.110.0,<0.120.0
-uvicorn>=0.28.0,<0.35.0
-https://github.com/kivymd/KivyMD/archive/master.zip # 2.0.1.dev0
+-r requirements-core.txt
+https://github.com/kivymd/KivyMD/archive/67c7941f6e1599540abd49d356291ede2647549d.zip # KivyMD master pinned to a commit (2.0.1.dev0)
 kivy[base]==2.3.1
-

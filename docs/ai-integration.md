@@ -73,7 +73,7 @@ tools = [
                 "properties": {
                     "message_id": {
                         "type": "string",
-                        "description": "The unique message ID returned by send_cellular_sms (e.g. 'msg_9f3b81ca7d2e4018')."
+                        "description": "The unique message ID returned by send_cellular_sms (e.g. '3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42')."
                     }
                 },
                 "required": ["message_id"]
@@ -181,7 +181,7 @@ def get_sms_status(message_id: str) -> dict:
     """Retrieve the delivery status of an SMS message by ID.
     
     Args:
-        message_id: The ID returned from send_sms (e.g. msg_9f3b81ca7d2e4018).
+        message_id: The ID returned from send_sms (e.g. 3f2b8c1a-9d4e-4a6b-8c2d-7e1f0a5b9c42).
     """
     headers = {"Authorization": f"Bearer {OPENSMS_KEY}"}
     try:

@@ -1,0 +1,12 @@
+# Pure-Python runtime pins shared by the app, desktop development and CI. Exact versions = the set the test
+# suite runs against (see constraints.txt for the full transitive freeze). `pip-audit` is clean for this set.
+# pydantic / pydantic-core must match the local python-for-android recipe (app/p4a_local_recipes/pydantic-core).
+# starlette 1.x needs Python >= 3.11.
+fastapi==0.162.0
+starlette==1.9.0
+annotated-doc==0.0.5
+opentelemetry-api==1.45.1
+uvicorn==0.34.3
+pydantic==2.12.3
+pydantic-core==2.41.4
+requests==2.34.2

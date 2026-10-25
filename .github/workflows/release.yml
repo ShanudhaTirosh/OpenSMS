@@ -1,5 +1,15 @@
 name: Release OpenSMS APK
 
+# Publishes a SIGNED release APK plus its SHA-256 (the in-app updater verifies it).
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   ANDROID_KEYSTORE_B64         base64 of your release keystore  (base64 -w0 release.keystore)
+#   ANDROID_KEYSTORE_PASSWORD
+#   ANDROID_KEY_ALIAS
+#   ANDROID_KEY_PASSWORD
+# Without them the job FAILS, because a debug-signed APK cannot be installed over a release signed with a
+# different key, which would silently break in-app updates. A manual run may opt in to a debug-signed
+# PRE-release with `allow_debug_signed`.
+
 on:
   push:
     tags:
@@ -7,9 +17,13 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name for release (e.g. v0.4.0)'
+        description: 'Tag to release (must equal v<version in app/app_version.py>, e.g. v0.4.0)'
+        required: true
+      allow_debug_signed:
+        description: 'Publish a debug-signed PRE-release when signing secrets are missing'
+        type: boolean
         required: false
-        default: 'v0.4.0'
+        default: false
 
 permissions:
   contents: write
@@ -17,6 +31,7 @@ permissions:
 env:
   ANDROID_API_LEVEL: '24'
   ANDROID_MINAPI: '24'
+  P4A_FORK_REF: 1d2d53739100eac44a310be1204249e1a695e70b
 
 jobs:
   release:
@@ -26,6 +41,41 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Determine and validate tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          TAG="${INPUT_TAG:-$REF_NAME}"
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Tag '$TAG' must look like v1.2.3"; exit 1
+          fi
+          VERSION="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' app/app_version.py)"
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Tag $TAG does not match app/app_version.py ($VERSION). The in-app updater compares these."; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check signing configuration
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ALLOW_DEBUG: ${{ github.event.inputs.allow_debug_signed }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$ALLOW_DEBUG" = "true" ]; then
+            echo "::warning::No signing secrets: publishing a DEBUG-signed pre-release. In-app updates over a differently signed install will fail."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Signing secrets are missing (see the comment at the top of this workflow). Refusing to publish an update that cannot be installed over earlier releases."
+            exit 1
+          fi
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -56,59 +106,75 @@ jobs:
           path: |
             ~/.buildozer
             ~/.gradle
-          key: ${{ runner.os }}-buildozer-release-${{ hashFiles('app/buildozer.spec', 'app/req_android.txt', 'app/p4a_local_recipes/**') }}
+          key: ${{ runner.os }}-buildozer-release-${{ hashFiles('app/buildozer.spec', 'app/requirements*.txt', 'app/p4a_local_recipes/**', 'app/java_src/**') }}
           restore-keys: |
             ${{ runner.os }}-buildozer-release-
 
       - name: Install Python build tools and dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install Cython==0.29.36 buildozer pytest httpx
-          pip install -r app/req_android.txt
+          pip install Cython==0.29.36 buildozer pytest httpx pyyaml
+          pip install -r app/req_android.txt -c app/constraints.txt
 
       - name: Run automated test suite
         run: |
-          pytest tests/ -v
+          python -m pytest tests -v
 
       - name: Prepare and patch python-for-android
         run: |
           mkdir -p app/.buildozer/android/platform
           if [ ! -d "app/.buildozer/android/platform/python-for-android" ]; then
-            git clone --depth 1 -b develop https://github.com/daslearning-org/p4a-unofficial.git app/.buildozer/android/platform/python-for-android
+            git clone https://github.com/daslearning-org/p4a-unofficial.git app/.buildozer/android/platform/python-for-android
+            git -C app/.buildozer/android/platform/python-for-android checkout "$P4A_FORK_REF"
           fi
           python3 app/patch_p4a.py app/.buildozer/android/platform/python-for-android
 
-      - name: Build Android APK with Buildozer
+      - name: Build signed release APK
+        if: steps.signing.outputs.signed == 'true'
         working-directory: app
         env:
-          ANDROID_API_LEVEL: '24'
-          ANDROID_MINAPI: '24'
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          P4A_RELEASE_KEYSTORE_PASSWD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          P4A_RELEASE_KEYALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          P4A_RELEASE_KEYALIAS_PASSWD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          export ANDROID_API_LEVEL=24
-          export ANDROID_MINAPI=24
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          export P4A_RELEASE_KEYSTORE="$RUNNER_TEMP/release.keystore"
+          buildozer android release
+          rm -f "$RUNNER_TEMP/release.keystore"
+
+      - name: Build debug-signed APK (explicitly allowed, pre-release only)
+        if: steps.signing.outputs.signed != 'true'
+        working-directory: app
+        run: |
           buildozer android debug
 
-      - name: Inspect generated APK artifacts
+      - name: Checksums and certificate fingerprint
         run: |
-          ls -la app/bin/
-
-      - name: Determine Tag
-        id: get_tag
-        run: |
-          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
-            echo "tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+          cd app/bin
+          ls -la
+          if ls ./*unsigned*.apk >/dev/null 2>&1; then
+            echo "::error::An unsigned APK was produced; refusing to publish it."; exit 1
+          fi
+          for f in *.apk; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done
+          sha256sum *.apk | tee -a "$GITHUB_STEP_SUMMARY"
+          APKSIGNER="$(find "$HOME/.buildozer" -name apksigner -type f 2>/dev/null | head -n1)"
+          if [ -n "$APKSIGNER" ]; then
+            for f in *.apk; do "$APKSIGNER" verify --print-certs "$f" | tee -a "$GITHUB_STEP_SUMMARY" || true; done
           else
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "apksigner not found; certificate fingerprint not printed" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Create GitHub Release and Upload APK
+      - name: Create GitHub Release and upload APK + checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_tag.outputs.tag }}
-          name: OpenSMS ${{ steps.get_tag.outputs.tag }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: OpenSMS ${{ steps.tag.outputs.tag }}${{ steps.signing.outputs.signed != 'true' && ' (debug-signed)' || '' }}
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.signing.outputs.signed != 'true' }}
           generate_release_notes: true
-          files: app/bin/*.apk
+          files: |
+            app/bin/*.apk
+            app/bin/*.apk.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

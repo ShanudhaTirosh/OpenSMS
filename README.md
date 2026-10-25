@@ -14,9 +14,9 @@ Developed & maintained by **[Shanudha Tirosh](https://info.shanutechx.com)**.
 - 🚀 **1-Tap In-App Auto-Updater**: Automatic update checks directly against GitHub Releases, animated banner alerts, download progress reporting, and native Android APK package installation (`REQUEST_INSTALL_PACKAGES`).
 - 📊 **Live Metrics & SQLite Message Persistence**: High-performance SQLite engine operating in Write-Ahead Logging (`WAL`) mode. Tracks queued, sent, and failed messages with live home dashlet metrics (Sent Today, Success Rate %, and Queue Depth).
 - 📶 **Dual-SIM & Multi-SIM Telephony Orchestration**: Auto-detects dual SIM configurations via Android `SubscriptionManager`. Choose preferred carrier slot in Settings or dynamically route per API request using `sim_slot`.
-- 🌐 **Native Cross-Network Mesh (Tailscale Ready)**: Seamlessly connects across 2 different networks (cellular CGNAT, home Wi-Fi, remote cloud VPS, laptop, or backend servers) without open ports or port forwarding.
+- 🌐 **Tailscale-aware**: With the official Tailscale app connected on the phone, other devices on your tailnet reach the gateway at the phone's `100.x.y.z` address without port forwarding. OpenSMS shows the observed status and can restrict the API to the tailnet (see [docs/tailscale.md](docs/tailscale.md)).
 - ⚡ **Built-In Client Code Generator**: Generate copy-paste client code snippets in **cURL**, **Python (requests)**, **Node.js (fetch)**, **PHP (cURL)**, and **Go** directly from the in-app Remote Mesh tab.
-- 🔒 **Multi-Token Security & Granular Scopes**: Manage multiple named API tokens with permission scopes (`sms:send`, `sms:read`, `admin`) and individual revocation, backed by SHA-256 and brute-force rate-limiting.
+- 🔒 **Multi-Token Security & Granular Scopes**: Manage multiple named API tokens with permission scopes (`sms:write` to send, `sms:read` for history/stats, `admin` for key management) enforced on every endpoint, individual revocation via `DELETE /keys/{id}`, SHA-256 key hashing, brute-force lockout and a per-key send rate limit.
 - 📦 **Batch SMS & Tracking**: Send up to 100 SMS messages in a single API call via `/sms/batch/` with automated rate pacing (100ms) to prevent carrier throttling, plus individual status inspection via `/sms/{id}` and `/sms/history/`.
 - 💬 **Smart Telephony & Segmentation**: Automatic phone number sanitization (stripping spaces, brackets, hyphens) and real-time GSM-7 (160 chars) vs UCS-2 (70 chars) multipart SMS segment calculation.
 - 📱 **Wide Device Compatibility**: Supports Android 7.0 (API 24) up to Android 15+ (API 36), with both 64-bit (`arm64-v8a`) and 32-bit (`armeabi-v7a`) ARM architectures.
@@ -39,6 +39,8 @@ OpenSMS provides full interactive web documentation as well as dedicated machine
 | **[OpenAPI 3.1](docs/openapi.json)** | Machine-readable API specification for automated tool generators and Swagger/Postman. | JSON |
 
 ---
+
+> **Testing a new build?** Follow [docs/first-run.md](docs/first-run.md) (push, build, install, smoke test).
 
 ## 🧑‍💻 Quickstart Guide
 
@@ -105,12 +107,13 @@ curl -i -X POST 'http://<DEVICE_IP>:9292/sms/' \
 
 When your phone is on cellular data (CGNAT) or home Wi-Fi and your program/backend runs on a remote server, cloud VPS, or laptop on a **completely different network**, you have several easy options:
 
-### Option 1: Tailscale Mesh (Recommended & Zero-Config)
+### Option 1: Tailscale (Recommended)
 1. Install [Tailscale](https://tailscale.com) on your Android phone and on your remote server/laptop.
 2. Log into the same Tailscale tailnet on both devices.
 3. Open **OpenSMS** and navigate to the **Mesh** tab at the bottom navigation bar.
-4. OpenSMS automatically detects the `100.x.y.z` Tailscale CGNAT IP address and shows the **Tailscale Mesh Connected** badge.
-5. In the **Mesh** screen, select your language (**cURL**, **Python**, **Node.js**, **PHP**, or **Go**) to instantly generate ready-to-use code targeting your remote endpoint!
+4. OpenSMS reads the phone's `100.x.y.z` Tailscale address from the system and shows **Tailscale: connected**. It never asks for a Tailscale key and does not connect Tailscale for you; if it shows anything else, follow the diagnostics on that screen.
+5. Optional: choose **Tailscale only** under *API listening mode* so the API is unreachable from Wi-Fi/LAN.
+6. In the **Mesh** screen, select your language (**cURL**, **Python**, **Node.js**, **PHP**, or **Go**) to instantly generate ready-to-use code targeting your remote endpoint!
 
 ```python
 # Example: Sending SMS from a remote server anywhere in the world to your phone

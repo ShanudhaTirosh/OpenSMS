@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install ruff
+      - run: ruff check .
+
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # starlette 1.x needs >= 3.11; the Android build uses python-for-android's CPython
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: 'pip'
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements-core.txt -c app/constraints.txt pytest httpx pyyaml buildozer
+      - name: Run test suite
+        run: python -m pytest tests -v
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-22.04
+    # Advisory: a newly published CVE must not block unrelated work, but it is shown on every run.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pip-audit
+      - run: pip-audit -r app/requirements-core.txt --no-deps --disable-pip
+
+  ui-smoke:
+    name: UI smoke test (headless Kivy)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: System packages for a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri libgl1 libegl1 libmtdev1
+      - name: Install app dependencies (KivyMD pinned by commit)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt -c app/constraints.txt pytest httpx
+      - name: Icon-name and UI logic tests
+        run: python -m pytest tests/test_ui_icons.py tests/test_stage6_ui_logic.py -v
+      - name: Drive the real app (Messages + API screens)
+        working-directory: app
+        env:
+          OPENSMS_SHOT_DIR: ${{ github.workspace }}/ui-shots
+        run: |
+          export HOME="$RUNNER_TEMP/ui-home" XDG_DATA_HOME="$RUNNER_TEMP/ui-home"
+          mkdir -p "$HOME"
+          xvfb-run -a -s "-screen 0 1080x1920x24" python ../tools/ui_walkthrough.py
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: ui-shots
+          retention-days: 14
