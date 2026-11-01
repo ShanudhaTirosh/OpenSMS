@@ -85,7 +85,7 @@ def test_handler_exception_quarantines_only_that_item(cfg):
 def test_accepted_message_flows_through_the_normal_lifecycle(cfg):
     mid = write_outbox(cfg, "+94771234567", "from the app")
     assert drain_outbox(cfg, P.accept_local_message) == 1
-    m = wait_status(mid, {"sent", "submitted", "failed"})
+    m = wait_status(mid, {"sent", "failed"})
     assert m["status"] == "sent" and m["provider"] == "simulated" and m["recipient"] == "+94771234567"
     assert P.db_mgr.get_parts(mid)[0]["sent_ok"] == 1                              # receipts bookkeeping exists
 

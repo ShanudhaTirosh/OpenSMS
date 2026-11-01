@@ -14,7 +14,10 @@ xvfb and libgl1-mesa-dri.
 import os, sys, time, json
 os.environ.setdefault("OPENSMS_TS_FAKE", "fake_tailscale:make_fake")   # stand-in for libtailscale (tests/)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tests"))
-os.environ.update(KIVY_NO_ARGS="1", HOME="/tmp/hh", XDG_DATA_HOME="/tmp/hh", OPENSMS_ALLOW_SIMULATION="1")
+os.environ.setdefault("HOME", "/tmp/hh")
+os.environ.setdefault("XDG_DATA_HOME", os.environ["HOME"])
+os.makedirs(os.environ["HOME"], exist_ok=True)
+os.environ.update(KIVY_NO_ARGS="1", OPENSMS_ALLOW_SIMULATION="1")
 sys.path.insert(0, ".")
 from kivy.config import Config
 Config.set("graphics", "width", "412"); Config.set("graphics", "height", "860")
