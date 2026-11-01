@@ -2,6 +2,13 @@
 
 ## Changes
 
+### 0.5.1 (2026-11-01)
+- **Built-in Tailscale Engine & Lifecycle**: Fixed Tailscale deadlock when running in "Tailscale only" mode where service wasn't started; `ts_embedded_connect` now automatically starts the background service and safely handles secret provisioning.
+- **Cross-Platform C Foreign Function Interface**: Added Windows C-runtime memory management and socket detachment in `tsNative` and test mock suites.
+- **In-App Auto-Updater Enhancements**: Added Android Unknown Sources (`MANAGE_UNKNOWN_APP_SOURCES`) direct settings navigation (`can_install_packages()` and `open_install_permission_settings()`), background download throttling, and concurrent download guards.
+- **IPC & Concurrency Reliability**: Added write lock mutex and retry backoff around atomic JSON state file replacement on Windows NTFS.
+- **Outbox & Lifecycle Fixes**: Fixed lifecycle status transitions and headless Kivy walkthrough test runner paths.
+
 ### Unreleased (CI)
 - CI lints the workflows with actionlint + shellcheck; fixed two glob-quoting issues in the build/release scripts.
 
