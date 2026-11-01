@@ -103,14 +103,13 @@ jobs:
 
       - name: Build libtailscale for Android (arm64-v8a, armeabi-v7a)
         id: nativebuild
-        continue-on-error: true
         run: |
           python tools/build_libtailscale.py android --src libtailscale-src --out app/native --ndk "$ANDROID_NDK_LATEST_HOME"
 
       - name: Enable the engine in buildozer.spec (only for ABIs that built)
         run: |
           python tools/build_libtailscale.py enable-spec --spec app/buildozer.spec --native app/native | tee -a "$GITHUB_STEP_SUMMARY"
-          grep -n "add_libs" app/buildozer.spec || echo "No native libraries: building without the built-in Tailscale engine" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -n "add_libs" app/buildozer.spec || { echo "::error::Native libraries missing in app/buildozer.spec"; exit 1; }
 
       - name: Prepare and patch python-for-android
         run: |
@@ -131,9 +130,15 @@ jobs:
           export ANDROID_MINAPI=24
           buildozer android debug
 
-      - name: Show APK checksums
+      - name: Verify native libraries and show APK checksums
         run: |
-          cd app/bin && sha256sum ./*.apk | tee "$GITHUB_STEP_SUMMARY"
+          cd app/bin
+          for f in ./*.apk; do
+            echo "Verifying native libraries in $f..."
+            unzip -l "$f" | grep -F "lib/arm64-v8a/libtailscale.so" || { echo "::error::$f missing arm64-v8a/libtailscale.so"; exit 1; }
+            unzip -l "$f" | grep -F "lib/armeabi-v7a/libtailscale.so" || { echo "::error::$f missing armeabi-v7a/libtailscale.so"; exit 1; }
+          done
+          sha256sum ./*.apk | tee "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

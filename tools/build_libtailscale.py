@@ -35,7 +35,8 @@ ABIS = {
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Normalize CRLF to LF so checkouts with autocrlf on Windows match
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def verify_header(src: Path) -> None:
@@ -50,7 +51,12 @@ def verify_header(src: Path) -> None:
 
 def ndk_clang(ndk: Path, abi: str, api: int = API_LEVEL) -> Path:
     name = ABIS[abi]["clang"].format(api=api)
-    return ndk / "toolchains" / "llvm" / "prebuilt" / "linux-x86_64" / "bin" / name
+    prebuilt_root = ndk / "toolchains" / "llvm" / "prebuilt"
+    if sys.platform.startswith("win"):
+        win_bin = prebuilt_root / "windows-x86_64" / "bin"
+        if (win_bin / f"{name}.cmd").exists():
+            return win_bin / f"{name}.cmd"
+    return prebuilt_root / "linux-x86_64" / "bin" / name
 
 
 def plan_android_build(ndk: Path, abi: str, out_dir: Path, base_env: Optional[Dict[str, str]] = None, api: int = API_LEVEL):
@@ -59,8 +65,9 @@ def plan_android_build(ndk: Path, abi: str, out_dir: Path, base_env: Optional[Di
     env = dict(base_env or {})
     env.update({"CGO_ENABLED": "1", "GOOS": "android", "GOARCH": spec["goarch"], "CC": ndk_clang(ndk, abi, api).as_posix()})
     env.update(spec["extra_env"])
+    out_file = (Path(out_dir).resolve() / abi / "libtailscale.so").as_posix()
     cmd = ["go", "build", "-trimpath", "-buildmode=c-shared", "-ldflags", LDFLAGS,
-           "-o", (out_dir / abi / "libtailscale.so").as_posix(), "."]
+           "-o", out_file, "."]
     return cmd, env
 
 
@@ -70,6 +77,9 @@ def run(cmd: List[str], env: Dict[str, str], cwd: Path) -> int:
 
 
 def build_android(src: Path, out: Path, ndk: Path, abis: List[str]) -> List[str]:
+    src = src.resolve()
+    out = out.resolve()
+    ndk = ndk.resolve()
     verify_header(src)
     built = []
     for abi in abis:
@@ -79,12 +89,15 @@ def build_android(src: Path, out: Path, ndk: Path, abis: List[str]) -> List[str]
             continue
         (out / abi).mkdir(parents=True, exist_ok=True)
         cmd, env = plan_android_build(ndk, abi, out, dict(os.environ))
-        if run(cmd, env, src) == 0 and (out / abi / "libtailscale.so").exists():
-            size = (out / abi / "libtailscale.so").stat().st_size
+        env["PATH"] = f"{clang.parent.as_posix()}{os.pathsep}{env.get('PATH', '')}"
+        rc = run(cmd, env, src)
+        so_file = out / abi / "libtailscale.so"
+        if rc == 0 and so_file.exists():
+            size = so_file.stat().st_size
             print(f"[{abi}] built libtailscale.so ({size / 1048576:.1f} MB)")
             built.append(abi)
         else:
-            print(f"[{abi}] FAILED to build", file=sys.stderr)
+            print(f"[{abi}] FAILED to build (rc={rc}, exists={so_file.exists()})", file=sys.stderr)
     return built
 
 

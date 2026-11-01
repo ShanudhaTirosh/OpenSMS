@@ -139,14 +139,13 @@ jobs:
 
       - name: Build libtailscale for Android (arm64-v8a, armeabi-v7a)
         id: nativebuild
-        continue-on-error: true
         run: |
           python tools/build_libtailscale.py android --src libtailscale-src --out app/native --ndk "$ANDROID_NDK_LATEST_HOME"
 
       - name: Enable the engine in buildozer.spec (only for ABIs that built)
         run: |
           python tools/build_libtailscale.py enable-spec --spec app/buildozer.spec --native app/native | tee -a "$GITHUB_STEP_SUMMARY"
-          grep -n "add_libs" app/buildozer.spec || echo "No native libraries: building without the built-in Tailscale engine" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -n "add_libs" app/buildozer.spec || { echo "::error::Native libraries missing in app/buildozer.spec"; exit 1; }
 
       - name: Prepare and patch python-for-android
         run: |
@@ -184,7 +183,12 @@ jobs:
           if ls ./*unsigned*.apk >/dev/null 2>&1; then
             echo "::error::An unsigned APK was produced; refusing to publish it."; exit 1
           fi
-          for f in ./*.apk; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done
+          for f in ./*.apk; do
+            echo "Verifying native libraries in $f..."
+            unzip -l "$f" | grep -F "lib/arm64-v8a/libtailscale.so" || { echo "::error::$f missing arm64-v8a/libtailscale.so"; exit 1; }
+            unzip -l "$f" | grep -F "lib/armeabi-v7a/libtailscale.so" || { echo "::error::$f missing armeabi-v7a/libtailscale.so"; exit 1; }
+            sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"
+          done
           sha256sum ./*.apk | tee -a "$GITHUB_STEP_SUMMARY"
           APKSIGNER="$(find "$HOME/.buildozer" -name apksigner -type f 2>/dev/null | head -n1)"
           if [ -n "$APKSIGNER" ]; then
