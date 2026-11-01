@@ -29,6 +29,103 @@ Builder.load_string('''
             spacing: dp(14)
             padding: dp(8), dp(4), dp(8), dp(16)
 
+            # Built-in Tailscale (experimental): the app joins the tailnet itself, no Tailscale app needed
+            MDBoxLayout:
+                orientation: 'vertical'
+                adaptive_height: True
+                radius: [dp(16)]
+                padding: dp(16)
+                spacing: dp(8)
+                theme_bg_color: "Custom"
+                md_bg_color: [0.10, 0.45, 0.30, 0.14] if app.theme_style == "Light" else [0.10, 0.30, 0.22, 0.7]
+
+                MDLabel:
+                    text: root.emb_title
+                    font_style: "Title"
+                    role: "medium"
+                    adaptive_height: True
+
+                MDLabel:
+                    text: root.emb_detail
+                    font_style: "Body"
+                    role: "small"
+                    theme_text_color: "Secondary"
+                    adaptive_height: True
+
+                MDTextField:
+                    id: emb_key
+                    mode: "outlined"
+                    password: True
+                    size_hint_y: None
+                    height: dp(56) if root.emb_can_connect else 0
+                    opacity: 1 if root.emb_can_connect else 0
+                    disabled: not root.emb_can_connect
+
+                    MDTextFieldHintText:
+                        text: "Auth key or API token (tskey-...)"
+
+                MDTextField:
+                    id: emb_host
+                    mode: "outlined"
+                    size_hint_y: None
+                    height: dp(56) if root.emb_can_connect else 0
+                    opacity: 1 if root.emb_can_connect else 0
+                    disabled: not root.emb_can_connect
+
+                    MDTextFieldHintText:
+                        text: "Device name (optional, e.g. opensms-phone)"
+
+                MDTextField:
+                    id: emb_ctrl
+                    mode: "outlined"
+                    size_hint_y: None
+                    height: dp(56) if root.emb_can_connect else 0
+                    opacity: 1 if root.emb_can_connect else 0
+                    disabled: not root.emb_can_connect
+
+                    MDTextFieldHintText:
+                        text: "Control server URL (optional, e.g. Headscale)"
+
+                MDGridLayout:
+                    cols: 3
+                    adaptive_height: True
+                    spacing: dp(6)
+
+                    MDButton:
+                        style: "filled"
+                        disabled: not root.emb_can_connect
+                        on_release: root.emb_connect()
+                        MDButtonText:
+                            text: "Connect"
+
+                    MDButton:
+                        style: "outlined"
+                        disabled: not root.emb_can_disconnect
+                        on_release: app.ts_embedded_disconnect()
+                        MDButtonText:
+                            text: "Disconnect"
+
+                    MDButton:
+                        style: "text"
+                        disabled: not root.emb_can_forget
+                        on_release: app.ts_embedded_forget()
+                        MDButtonText:
+                            text: "Forget"
+
+                MDLabel:
+                    text: root.emb_peers_text
+                    font_style: "Body"
+                    role: "small"
+                    adaptive_height: True
+                    opacity: 1 if root.emb_peers_text else 0
+
+                MDLabel:
+                    text: "Experimental. The key is used once and never stored; an API token only creates a single-use key (valid 10 minutes). The device appears in your Tailscale admin console and can be removed there."
+                    font_style: "Label"
+                    role: "medium"
+                    theme_text_color: "Secondary"
+                    adaptive_height: True
+
             # Listening mode card (which network the API listens on)
             MDBoxLayout:
                 orientation: 'vertical'
@@ -305,6 +402,16 @@ class TailscaleBox(MDBoxLayout):
     state_title = StringProperty("Tailscale: checking...")
     state_detail = StringProperty("")
     diagnostics_text = StringProperty("")
+    emb_title = StringProperty("Built-in Tailscale")
+    emb_detail = StringProperty("")
+    emb_peers_text = StringProperty("")
+    emb_endpoint = StringProperty("")
+    emb_ip = StringProperty("")
+    emb_available = BooleanProperty(False)
+    emb_connected = BooleanProperty(False)
+    emb_can_connect = BooleanProperty(False)
+    emb_can_disconnect = BooleanProperty(False)
+    emb_can_forget = BooleanProperty(False)
     bind_mode = StringProperty("all")
     bind_help_text = StringProperty("")
     selected_lang = StringProperty("curl")
@@ -344,6 +451,42 @@ class TailscaleBox(MDBoxLayout):
         super().__init__(**kwargs)
         self.port = 9292
         self.cached_snippets = {}
+        Clock.schedule_interval(self._emb_poll, 2.0)
+
+    # ---- built-in Tailscale card
+    def _emb_poll(self, dt):
+        """The engine runs in the background service: refresh the card while this screen is showing."""
+        from kivymd.app import MDApp
+        app = MDApp.get_running_app()
+        try:
+            if app and app.root.ids.screen_manager.current == "Mesh":
+                before = self.emb_connected
+                self.emb_refresh()
+                if before != self.emb_connected:       # the status card below must follow the built-in node
+                    self.update_tailscale_info(port=self.port)
+        except Exception:
+            pass
+
+    def emb_refresh(self):
+        from kivymd.app import MDApp
+        from services.tsUiText import describe_embedded
+        app = MDApp.get_running_app()
+        status = app.ts_embedded_status() if app and hasattr(app, "ts_embedded_status") else {}
+        info = describe_embedded(status, self.port)
+        self.emb_title, self.emb_detail, self.emb_peers_text = info["title"], info["detail"], info["peers_text"]
+        self.emb_endpoint = info["endpoint"]
+        self.emb_ip = info["ip"]
+        self.emb_available, self.emb_connected = info["available"], info["connected"]
+        self.emb_can_connect, self.emb_can_disconnect, self.emb_can_forget = info["can_connect"], info["can_disconnect"], info["can_forget"]
+
+    def emb_connect(self):
+        from kivymd.app import MDApp
+        app = MDApp.get_running_app()
+        ok = app.ts_embedded_connect(self.ids.emb_key.text, self.ids.emb_host.text, self.ids.emb_ctrl.text)
+        if ok:
+            self.ids.emb_key.text = ""          # the key lives nowhere in the UI once it has been handed over
+        self.emb_refresh()
+        return ok
 
     def update_tailscale_info(self, port: int = 9292):
         """Refresh from what the device actually reports. The API key is never part of the snippets."""
@@ -370,6 +513,15 @@ class TailscaleBox(MDBoxLayout):
         self.diagnostics_text = "\n".join(
             f"{self._LEVEL_MARK.get(d['level'], '[i]')} {d['text']}" for d in status["diagnostics"])
 
+        self.emb_refresh()
+        if self.emb_connected and self.emb_endpoint:
+            endpoint, net_type = self.emb_endpoint, "Built-in Tailscale"
+            self.ts_endpoint_text = f"{net_type} endpoint: {endpoint}"
+            self.is_ts_connected = True
+            self.ts_ip_text = self.emb_ip or "connected"
+            self.state_title = "Tailscale: connected (built-in)"
+            self.state_detail = ("This phone is on your tailnet through the built-in Tailscale. Other tailnet devices "
+                                 "can reach the gateway at the address below while the server is running.")
         self.cached_snippets = TailscaleService.generate_code_snippets(endpoint)
         self.snippet_code = self.cached_snippets.get(self.selected_lang, "")
 
@@ -382,6 +534,8 @@ class TailscaleBox(MDBoxLayout):
         app = MDApp.get_running_app()
         mode = app.config_template.get("bind_mode", "all") if app else "all"
         url, _ = TailscaleService.get_preferred_endpoint(self.port, mode)
+        if self.emb_connected and self.emb_endpoint:
+            url = self.emb_endpoint
         Clipboard.copy(url)
         if app and hasattr(app, "show_toast_msg"):
             app.show_toast_msg(f"Copied endpoint: {url}")

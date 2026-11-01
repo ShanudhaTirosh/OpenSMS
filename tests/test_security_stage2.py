@@ -126,6 +126,7 @@ def test_search_wildcards_are_literal(cfg):
     assert len(db.get_messages(search="_")) == 0
 
 
+@pytest.mark.skipif(not os.path.exists("/proc/self/fd"), reason="/proc/self/fd is Linux only")
 def test_db_connections_are_closed(cfg):
     db = DatabaseManager(str(cfg / "fd.db"))
     gc.disable()

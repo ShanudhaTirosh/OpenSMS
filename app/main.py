@@ -3,6 +3,7 @@ os.environ['KIVY_GL_BACKEND'] = 'sdl2'
 from kivy.config import Config
 Config.set("graphics", "multisamples", "0")
 import sys
+import time
 import json
 import socket
 from threading import Thread
@@ -47,6 +48,7 @@ from services.postApi import get_api_keys, set_config_path, generate_new_api_key
 from services.pathMgr import atomic_write_json, get_device_ip_addresses, get_network_interfaces_info
 from services.tailscaleSvc import TailscaleService, BIND_ALL, BIND_MODES, normalize_bind_mode
 from services.lifecycle import initial_request, resp_is_fresh
+from services import tsEmbed
 
 # IMPORTANT: Set this property for keyboard behavior
 Window.softinput_mode = "below_target"
@@ -101,6 +103,7 @@ kv_file_path = os.path.join(base_path, 'main_layout.kv')
 class OpenSmsApp(MDApp):
     theme_style = StringProperty("Light")
     screen_title = StringProperty("OpenSMS • Gateway")
+    app_version = StringProperty(__version__)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -125,6 +128,8 @@ class OpenSmsApp(MDApp):
             "sim_slot": -1,
             "bind_mode": BIND_ALL,
             "server_desired": "stop",
+            "ts_embedded": "down",
+            "ts_forget_id": 0,
             "tailscale": {}
         }
         self.req_template = {
@@ -217,6 +222,8 @@ class OpenSmsApp(MDApp):
                 if saved_config.get("bind_mode") in BIND_MODES:
                     self.config_template["bind_mode"] = saved_config["bind_mode"]
                 self.config_template["server_desired"] = "start" if saved_config.get("server_desired") == "start" else "stop"
+                self.config_template["ts_embedded"] = "up" if saved_config.get("ts_embedded") == "up" else "down"
+                self.config_template["ts_forget_id"] = int(saved_config.get("ts_forget_id", 0) or 0)
             except Exception as e:
                 print(f"Config load error: {e}")
 
@@ -405,6 +412,80 @@ class OpenSmsApp(MDApp):
             PythonActivity.mActivity.startActivity(intent)
         except Exception as e:
             self.show_toast_msg(f"Could not open battery settings: {e}", is_error=True)
+
+    # ---- built-in Tailscale (experimental; the engine lives in the background service)
+    def ts_embedded_status(self) -> dict:
+        """The engine's status as last published by the service ({} when the service is not running)."""
+        try:
+            with open(self.resp_path, "r", encoding="utf-8") as rf:
+                resp = json.load(rf)
+        except (OSError, ValueError, AttributeError):
+            return {}
+        return (resp.get("ts_embedded") or {}) if resp_is_fresh(resp) else {}
+
+    def _ts_set_desired(self, value: str):
+        self.config_template["ts_embedded"] = value
+        self.req_template["ts_embedded"] = value
+        self.req_template["ts_forget_id"] = self.config_template.get("ts_forget_id", 0)
+        Thread(target=self.write_app_conf, daemon=True).start()
+        self.write_request()
+
+    def ts_embedded_connect(self, key_text: str, hostname: str = "", control_url: str = "") -> bool:
+        """Hand a key to the service through a private one-shot file and ask it to connect. Returns True if sent."""
+        if not self.service_alive():
+            if platform == "android":
+                try:
+                    self.start_service()
+                except Exception as e:
+                    print(f"Error while starting android service: {e}")
+            else:
+                if not getattr(self, "_service_thread_started", False):
+                    from services.appSvc import app_service_thread
+                    Thread(target=app_service_thread, daemon=True).start()
+                    self._service_thread_started = True
+        status = self.ts_embedded_status()
+        if status.get("available") is False:
+            self.show_toast_msg("This build does not include the built-in Tailscale engine.", is_error=True)
+            return False
+        if not (key_text or "").strip() and status.get("saved_identity"):
+            self._ts_set_desired("up")               # no key typed: resume with the saved device identity
+            self.show_toast_msg("Reconnecting...")
+            return True
+        try:
+            kind, value = tsEmbed.classify_key(key_text)
+            ctrl = tsEmbed.validate_control_url(control_url)
+            tsEmbed.write_secret(self.config_dir, kind, value, hostname.strip(), ctrl or "")
+        except tsEmbed.KeyProblem as e:
+            self.show_toast_msg(str(e), is_error=True)
+            return False
+        except OSError as e:
+            self.show_toast_msg(f"Could not hand the key to the service: {e}", is_error=True)
+            return False
+        self._ts_set_desired("up")
+        self.show_toast_msg("Connecting to your tailnet...")
+        return True
+
+    def ts_embedded_disconnect(self, instance=None):
+        self._ts_set_desired("down")
+        self.show_toast_msg("Built-in Tailscale disconnected (the device identity is kept)")
+
+    def ts_embedded_forget(self, instance=None):
+        def do_forget(*_):
+            self.txt_dialog_closer()
+            self.config_template["ts_forget_id"] = int(self.config_template.get("ts_forget_id", 0)) + 1
+            self._ts_set_desired("down")
+            self.show_toast_msg("Device forgotten. Remove it from the Tailscale admin console too.")
+        buttons = MDDialogButtonContainer(
+            Widget(),
+            MDButton(MDButtonText(text="Cancel"), style="text", on_release=self.txt_dialog_closer),
+            MDButton(MDButtonText(text="Forget", theme_text_color="Custom", text_color="red"), style="text", on_release=do_forget),
+            spacing="8dp",
+        )
+        self.show_text_dialog(
+            "Forget this device?",
+            "The built-in node disconnects and deletes its identity from this phone. You will need a new key to connect again. "
+            "The device entry stays in your Tailscale admin console until you remove it there.",
+            None, buttons)
 
     def service_alive(self) -> bool:
         """True when the background service has written a recent heartbeat."""
@@ -772,6 +853,8 @@ class OpenSmsApp(MDApp):
             "sim_slot": -1,
             "bind_mode": BIND_ALL,
             "server_desired": "stop",
+            "ts_embedded": "down",
+            "ts_forget_id": self.config_template.get("ts_forget_id", 0),
             "tailscale": {}
         }
         self.req_template["port"] = 9292
@@ -1013,6 +1096,10 @@ class OpenSmsApp(MDApp):
 
     def start_download_and_install(self, update_info: dict):
         self.txt_dialog_closer()
+        if getattr(self, "_downloading_update", False):
+            self.show_toast_msg("An update download is already in progress.")
+            return
+
         apk_url = update_info.get("apk_url")
         if not apk_url:
             self.show_toast_msg("No APK asset in release. Opening GitHub release page...")
@@ -1022,25 +1109,40 @@ class OpenSmsApp(MDApp):
         dest_dir = os.path.join(str(self.internal_storage), "updates")
         target_file = os.path.join(dest_dir, f"OpenSMS-v{update_info.get('latest_version')}.apk")
         self.show_toast_msg(f"Downloading v{update_info.get('latest_version')} in background...")
+        self._downloading_update = True
 
         def dl_worker():
-            def progress(percent, dl_bytes, total_bytes):
-                pass
+            try:
+                last_reported = [0.0]
+                last_pct = [0]
 
-            res = UpdateManager.download_apk(apk_url, target_file, progress_callback=progress,
-                                             expected_sha256=update_info.get("apk_sha256"))
-            if res.get("success"):
-                note = "Download verified. Launching installer..." if res.get("verified") else \
-                       "Download complete (no published checksum to verify). Launching installer..."
-                Clock.schedule_once(lambda dt: self.show_toast_msg(note))
-                inst = UpdateManager.install_apk(
-                    target_file,
-                    on_status=lambda kind, text: Clock.schedule_once(
-                        lambda dt: self.show_toast_msg(text, is_error=(kind == "error"))))
-                if not inst.get("success"):
-                    Clock.schedule_once(lambda dt: self.show_toast_msg(inst.get("error", "Installation error"), is_error=True))
-            else:
-                Clock.schedule_once(lambda dt: self.show_toast_msg(res.get("error", "Download failed"), is_error=True))
+                def progress(percent, dl_bytes, total_bytes):
+                    now = time.time()
+                    pct_int = int(percent)
+                    if (pct_int >= last_pct[0] + 25 or (now - last_reported[0] >= 3.0 and pct_int != last_pct[0])):
+                        last_reported[0] = now
+                        last_pct[0] = pct_int
+                        Clock.schedule_once(lambda dt, p=pct_int: self.show_toast_msg(f"Downloading update: {p}%"))
+
+                res = UpdateManager.download_apk(apk_url, target_file, progress_callback=progress,
+                                                 expected_sha256=update_info.get("apk_sha256"))
+                if res.get("success"):
+                    note = "Download verified. Launching installer..." if res.get("verified") else \
+                           "Download complete (no published checksum to verify). Launching installer..."
+                    Clock.schedule_once(lambda dt: self.show_toast_msg(note))
+
+                    def _on_status(kind, text):
+                        Clock.schedule_once(lambda dt: self.show_toast_msg(text, is_error=(kind == "error")))
+                        if kind == "error" and "settings" in str(text).lower() and platform == "android":
+                            Clock.schedule_once(lambda dt: UpdateManager.open_install_permission_settings(), 2.0)
+
+                    inst = UpdateManager.install_apk(target_file, on_status=_on_status)
+                    if not inst.get("success"):
+                        Clock.schedule_once(lambda dt: self.show_toast_msg(inst.get("error", "Installation error"), is_error=True))
+                else:
+                    Clock.schedule_once(lambda dt: self.show_toast_msg(res.get("error", "Download failed"), is_error=True))
+            finally:
+                self._downloading_update = False
 
         Thread(target=dl_worker, daemon=True).start()
 

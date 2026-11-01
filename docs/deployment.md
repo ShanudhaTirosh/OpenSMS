@@ -36,6 +36,15 @@ and the new pins are the newest build inputs.
 - *Force stop* in Android settings kills the service and Android does not restart it until you open the app again.
 - Sideloaded installs are not affected by Play's review of `specialUse`; a Play Store release would need a declared justification.
 
+## Built-in Tailscale engine in the APK
+`build-apk.yml` and `release.yml` build Tailscale's `libtailscale` for `arm64-v8a` and `armeabi-v7a` (Go + the runner's Android NDK,
+`tools/build_libtailscale.py`, pinned commit) and then add `android.add_libs_*` lines to `app/buildozer.spec` **for the ABIs that built**.
+If the Go build fails, the APK is still produced without the engine (the Mesh card says "not in this build"); look at the step
+*Build libtailscale for Android* in the log. The job summary lists which ABIs were enabled. Expect about 15-30 MB more APK per ABI.
+A separate job, *native-tailscale* in `ci.yml` (informational), runs `tests/test_ts_real_lib.py` against the real library and Tailscale's
+test control server on Linux. To update the library: change the commit in the workflows, `tools/build_libtailscale.py` and `app/native/README.md`
+(a test keeps them equal), replace `app/native/tailscale.h` and review `app/services/tsNative.py` if the header changed (the build refuses to continue otherwise).
+
 ## In-app updates
 The updater downloads the APK from `https://github.com/ShanudhaTirosh/OpenSMS/releases` (the `UPDATE_REPO` setting), verifies its
 published SHA-256 when one exists, and installs it with Android's `PackageInstaller`: Android shows its own confirmation screen, and

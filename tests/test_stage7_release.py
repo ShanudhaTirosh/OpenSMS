@@ -223,3 +223,10 @@ def test_java_sources_compile_against_android_stubs():
         assert "(ILjava/lang/String;Landroid/content/Intent;)V" in desc               # matches @java_method in updateMgr
         desc2 = subprocess.run(["javap", "-cp", str(out), "-s", "org.opensms.gateway.SmsResultListener"], capture_output=True, text=True).stdout
         assert "(Ljava/lang/String;Ljava/lang/String;III)V" in desc2                  # matches @java_method in smsReceipts
+
+
+def test_permission_helpers_on_desktop():
+    # Outside Android, can_install_packages defaults True and open_settings returns False
+    assert UpdateManager.can_install_packages() is True
+    assert UpdateManager.open_install_permission_settings() is False
+

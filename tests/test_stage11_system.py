@@ -139,3 +139,23 @@ def test_ui_process_does_not_register_the_receipt_receiver(tmp_path, monkeypatch
     P.set_config_path(str(d2))                                                         # default: the service registers
     assert len(calls) == 1
     P.message_svc.stop()
+
+
+# ---------------- built-in Tailscale rows ----------------
+def test_builtin_tailscale_rows():
+    f = healthy()
+    f["ts_embedded"] = {"state": "connected", "hostname": "phone", "ip": "100.64.0.10", "online_peers": 2, "peer_count": 3, "forwarded": {"accepted": 7}}
+    r = rows(D.build_sections(f), "Built-in Tailscale")[0]
+    assert r["level"] == D.OK and "phone" in r["value"] and "2/3 peers" in r["value"] and "7 connections" in r["value"]
+    for state, level in (("needs_auth", D.WARN), ("needs_approval", D.WARN), ("error", D.ERROR), ("starting", D.INFO), ("disabled", D.INFO)):
+        r = rows(D.build_sections({**healthy(), "ts_embedded": {"state": state, "error": "x"}}), "Built-in Tailscale")[0]
+        assert r["level"] == level, state
+    r = rows(D.build_sections({**healthy(), "ts_embedded": {"state": "unavailable", "available": False}}), "Built-in Tailscale")[0]
+    assert "Not included" in r["value"]
+    assert rows(D.build_sections(healthy()), "Built-in Tailscale") == []                # no row when the service has not reported it
+
+
+def test_report_appends_a_redacted_engine_log():
+    text = D.to_text(D.build_sections(healthy()), "hdr", extra_log="line one\nline two")
+    assert "BUILT-IN TAILSCALE ENGINE LOG" in text and "  line two" in text
+    assert "ENGINE LOG" not in D.to_text(D.build_sections(healthy()), "hdr")

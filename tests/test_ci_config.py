@@ -99,3 +99,8 @@ def test_kivymd_is_pinned_by_commit():
 def test_debug_builds_keep_a_stable_signature():
     text = (ROOT / ".github/workflows/build-apk.yml").read_text()
     assert "~/.android" in text and "debug-keystore" in text      # otherwise test builds cannot update each other
+
+
+def test_ci_lints_the_workflows_themselves():
+    text = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "actionlint" in text and "1.7.12" in text

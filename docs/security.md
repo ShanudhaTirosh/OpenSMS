@@ -29,9 +29,13 @@ what is **not**.
 - Interactive docs and the AI discovery files require an API key unless `OPENSMS_PUBLIC_DOCS=1`.
 
 ## Tailscale credentials
-OpenSMS never asks for, stores or transmits a Tailscale auth key or API key. Versions before this audit stored one in
-plain text; it is deleted on first start of the new version. **If you ever entered a Tailscale key in an old version,
-revoke it in the Tailscale admin console.**
+- **Tailscale-app mode:** OpenSMS never asks for a Tailscale key. Versions before this audit stored one in plain text; it is deleted on
+  first start of the new version. **If you ever entered a Tailscale key in an old version, revoke it in the Tailscale admin console.**
+- **Built-in Tailscale (experimental):** you give it an auth key or an API token once. The key travels app -> service in a private
+  one-shot file (`0600`, zero-overwritten and deleted when read), is never written to request/status files, logs or the diagnostics report, and is
+  not kept; an API token only creates a single-use 10-minute auth key. What *is* kept is the node's identity in `config/tsnet/`
+  (app-private, not backed up): protect the phone, and **Forget** + remove the device in the admin console if the phone is lost.
+  See [tailscale.md](tailscale.md).
 
 ## Background service
 The gateway runs as a sticky foreground service so it survives closing the app; a persistent notification shows it is active and **Stop Server**

@@ -120,6 +120,34 @@ jobs:
         run: |
           python -m pytest tests -v
 
+      # Built-in Tailscale engine (experimental): libtailscale compiled with Go + the NDK. If this fails the APK is still
+      # built, just without the engine (the app then says "not included in this build").
+      - name: Checkout libtailscale (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: tailscale/libtailscale
+          ref: d1dc45d039edb7759ecbee6ba2aea0c4bca884b8
+          path: libtailscale-src
+
+      - name: Set up Go (version from libtailscale/go.mod)
+        id: gosetup
+        continue-on-error: true
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: libtailscale-src/go.mod
+          cache: false
+
+      - name: Build libtailscale for Android (arm64-v8a, armeabi-v7a)
+        id: nativebuild
+        continue-on-error: true
+        run: |
+          python tools/build_libtailscale.py android --src libtailscale-src --out app/native --ndk "$ANDROID_NDK_LATEST_HOME"
+
+      - name: Enable the engine in buildozer.spec (only for ABIs that built)
+        run: |
+          python tools/build_libtailscale.py enable-spec --spec app/buildozer.spec --native app/native | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -n "add_libs" app/buildozer.spec || echo "No native libraries: building without the built-in Tailscale engine" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Prepare and patch python-for-android
         run: |
           mkdir -p app/.buildozer/android/platform
@@ -156,11 +184,11 @@ jobs:
           if ls ./*unsigned*.apk >/dev/null 2>&1; then
             echo "::error::An unsigned APK was produced; refusing to publish it."; exit 1
           fi
-          for f in *.apk; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done
-          sha256sum *.apk | tee -a "$GITHUB_STEP_SUMMARY"
+          for f in ./*.apk; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done
+          sha256sum ./*.apk | tee -a "$GITHUB_STEP_SUMMARY"
           APKSIGNER="$(find "$HOME/.buildozer" -name apksigner -type f 2>/dev/null | head -n1)"
           if [ -n "$APKSIGNER" ]; then
-            for f in *.apk; do "$APKSIGNER" verify --print-certs "$f" | tee -a "$GITHUB_STEP_SUMMARY" || true; done
+            for f in ./*.apk; do "$APKSIGNER" verify --print-certs "$f" | tee -a "$GITHUB_STEP_SUMMARY" || true; done
           else
             echo "apksigner not found; certificate fingerprint not printed" | tee -a "$GITHUB_STEP_SUMMARY"
           fi

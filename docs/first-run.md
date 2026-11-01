@@ -26,8 +26,12 @@ Everything below the "Prepare" step is what has **never been executed** yet. Tak
 3. Close the app and swipe it away: the notification stays and the same `curl` still works.
 4. Messages tab > new-message button: send one from the app.
 
+## 4b. Optional: built-in Tailscale (experimental)
+Only after the smoke test above works. In the Tailscale admin console create a **single-use, pre-approved, short-expiry auth key**, then Mesh screen > *Built-in Tailscale* > paste it > **Connect**.
+If the card says *not in this build*, the native engine was not packaged: check the CI step *Build libtailscale for Android* (the rest of the app is unaffected). If it connects, call the gateway from a laptop on the tailnet at the address shown. Details and the checklist: `docs/tailscale.md`, `device-test-plan.md` section 8.
+
 ## 5. Then work through `device-test-plan.md`
-Sections 1 (SMS), 7 (System), 5 (background, including an overnight run on Android 15+), 4 (Tailscale), 6 (updater). Note each result; send me anything that fails, with the System screen's **Copy report** text and, for crashes, `adb logcat -b crash`.
+Sections 1 (SMS), 7 (System), 5 (background, including an overnight run on Android 15+), 4 (Tailscale app), 8 (built-in Tailscale), 6 (updater). Note each result; send me anything that fails, with the System screen's **Copy report** text and, for crashes, `adb logcat -b crash`.
 
 ## 6. When you want a real release
 Create the signing key and the four repository secrets (see `deployment.md`), bump `app/app_version.py`, tag `vX.Y.Z`. Do not release before sections 1, 5 and 6 pass on your phone.

@@ -183,11 +183,29 @@ def gather_facts(app) -> dict:
         facts["local_ip"] = st.get("local_ip")
     except Exception:
         pass
+    if fresh and resp.get("ts_embedded") is not None:
+        facts["ts_embedded"] = resp["ts_embedded"]
+    try:
+        facts["ts_log"] = _tsembed_log_tail(app.config_dir)
+    except Exception:
+        facts["ts_log"] = ""
     try:
         facts["db"] = DatabaseManager.get_instance(app.config_dir).storage_stats()
     except Exception:
         facts["db"] = {}
     return facts
+
+
+def _tsembed_log_tail(config_dir: str, lines: int = 30) -> str:
+    """Last lines of the built-in Tailscale engine log with every key pattern redacted."""
+    from services.tsEmbed import redact
+    try:
+        with open(os.path.join(config_dir, "tsnet.log"), "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 16384))
+            return redact("\n".join(f.read().decode("utf-8", "replace").splitlines()[-lines:]))
+    except OSError:
+        return ""
 
 
 class SystemBox(MDBoxLayout):
@@ -282,7 +300,7 @@ class SystemBox(MDBoxLayout):
         if not self.sections:
             app.show_toast_msg("Nothing to copy yet", is_error=True)
             return
-        Clipboard.copy(D.to_text(self.sections, f"OpenSMS {__version__} diagnostics"))
+        Clipboard.copy(D.to_text(self.sections, f"OpenSMS {__version__} diagnostics", _tsembed_log_tail(app.config_dir)))
         app.show_toast_msg("Report copied (contains no keys, numbers or message text)")
 
 

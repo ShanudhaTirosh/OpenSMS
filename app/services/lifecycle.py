@@ -23,6 +23,8 @@ def initial_request(config: dict, port: int, bind: str) -> dict:
         "server": desired_server_state(config),
         "bind": bind,
         "wakelock": bool(config.get("wakelock", True)),
+        "ts_embedded": "up" if config.get("ts_embedded") == "up" else "down",   # built-in Tailscale: last choice
+        "ts_forget_id": int(config.get("ts_forget_id", 0) or 0),
     }
 
 

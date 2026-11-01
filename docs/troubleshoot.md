@@ -36,5 +36,10 @@ adb shell getprop ro.product.model
 | The gateway stops after a while with the screen off | Battery management: set OpenSMS to *Unrestricted* (Settings > Keep running in background) and allow auto-start / background activity in your manufacturer's settings |
 | The gateway is offline after a reboot | It does not start by itself after a reboot; open the app once |
 | "The gateway is not running" when sending from the app | In-app sending needs the service: Home > Start Server first |
+| Built-in Tailscale says "not in this build" | The Go/NDK step failed in CI: see *Build libtailscale for Android* in the build log; the rest of the app is unaffected |
+| Built-in Tailscale: "key needed" after entering a key | The key was rejected: auth keys are single-use by default, expire, and belong to one tailnet. Create a new one |
+| Built-in Tailscale: "waiting for approval" | Approve the device in the Tailscale admin console (Machines) or generate a pre-approved key |
+| Built-in Tailscale: "switched off because the service ended unexpectedly" | The crash guard stopped it after repeated crashes; press Connect to retry and send the diagnostics report (it includes the engine log) |
+| Tailnet device cannot reach the phone | Built-in node *connected*? The gateway running? Tailscale ACLs allow the port? Is the API key right? Check the System screen |
 | Update "Install" opens the browser | Automatic install is not available on this device; download the APK from the opened release page |
 | "Checksum mismatch" on update | The download did not match the published SHA-256 and was discarded; retry, and report if it persists |

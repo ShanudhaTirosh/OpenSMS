@@ -12,11 +12,9 @@ Run from the app/ directory. Screenshots go to OUT below. Needs a GL-capable (so
 xvfb and libgl1-mesa-dri.
 """
 import os, sys, time, json
-home = os.environ.get("HOME") or "/tmp/hh"
-os.makedirs(home, exist_ok=True)
-os.environ.setdefault("HOME", home)
-os.environ.setdefault("XDG_DATA_HOME", home)
-os.environ.update(KIVY_NO_ARGS="1", OPENSMS_ALLOW_SIMULATION="1")
+os.environ.setdefault("OPENSMS_TS_FAKE", "fake_tailscale:make_fake")   # stand-in for libtailscale (tests/)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tests"))
+os.environ.update(KIVY_NO_ARGS="1", HOME="/tmp/hh", XDG_DATA_HOME="/tmp/hh", OPENSMS_ALLOW_SIMULATION="1")
 sys.path.insert(0, ".")
 from kivy.config import Config
 Config.set("graphics", "width", "412"); Config.set("graphics", "height", "860")
@@ -31,7 +29,7 @@ class Shots(M.OpenSmsApp):
     def on_start(self):
         super().on_start()
         try:
-            self.steps = [self.s_seed, self.s_overview, self.s_msgs, self.s_msgs_failed, self.s_detail, self.s_api, self.s_newkey, self.s_keyshown, self.s_revoke, self.s_empty_search, self.s_compose, self.s_compose_invalid, self.s_compose_review, self.s_compose_send, self.s_system, self.s_system_clear, self.s_dark_msgs, self.s_done]
+            self.steps = [self.s_seed, self.s_overview, self.s_msgs, self.s_msgs_failed, self.s_detail, self.s_api, self.s_newkey, self.s_keyshown, self.s_revoke, self.s_empty_search, self.s_compose, self.s_compose_invalid, self.s_compose_review, self.s_compose_send, self.s_mesh_invalid, self.s_mesh_connect, self.s_mesh_forget, self.s_system, self.s_system_clear, self.s_dark_msgs, self.s_done]
             Clock.schedule_once(self.run_step, 1.5)
         except Exception as e:
             errors.append(("on_start_error", repr(e))); self.stop()
@@ -148,6 +146,54 @@ class Shots(M.OpenSmsApp):
         log.append(("outbox_files", [(p["number"], p["text"]) for p in payloads]))
         if len(files) != 1: errors.append(("compose_send", f"expected exactly one outbox file, got {len(files)}"))
         return 0.6
+    # ---- Built-in Tailscale card on the Mesh screen (the service runs inside this process; libtailscale is the fake)
+    def s_mesh_invalid(self):
+        import os as _os
+        self.goto_tailscale_screen()
+        box = self.root.ids.tailscale_scr
+        box.ids.emb_key.text = "hello"
+        ok = box.emb_connect()
+        leftover = _os.path.exists(_os.path.join(self.config_dir, "ts_secret.json"))
+        log.append(("mesh_invalid_key", (ok, leftover, box.ids.emb_key.text)))
+        if ok or leftover: errors.append(("mesh", "an invalid key must not be handed to the service"))
+        return 1.0
+    def s_mesh_connect(self):
+        import os as _os, json as _j, stat as _st
+        box = self.root.ids.tailscale_scr
+        box.ids.emb_key.text = "tskey-auth-good-ABCDEFGH1234"
+        box.ids.emb_host.text = "Phone UI"
+        sent = box.emb_connect()
+        mode = None
+        p = _os.path.join(self.config_dir, "ts_secret.json")
+        if _os.path.exists(p): mode = _st.S_IMODE(_os.stat(p).st_mode)
+        log.append(("mesh_connect", (sent, mode, box.ids.emb_key.text)))
+        if not sent: errors.append(("mesh", "connect was refused"))
+        def check(dt):
+            st = self.ts_embedded_status()
+            req = _j.load(open(_os.path.join(self.config_dir, "request.json")))
+            log.append(("mesh_status", (st.get("state"), st.get("ip"), st.get("hostname"), req.get("ts_embedded"))))
+            if st.get("state") != "connected": errors.append(("mesh", f"not connected: {st.get('state')} {st.get('error')}"))
+            if "tskey-" in _j.dumps(req): errors.append(("mesh", "key leaked into request.json"))
+            if box.ids.emb_key.text: errors.append(("mesh", "key still in the input field"))
+            box.emb_refresh()
+            if not box.emb_connected: errors.append(("mesh", "card does not show connected"))
+        Clock.schedule_once(check, 3.0)
+        Clock.schedule_once(lambda dt: self.shot("19_mesh_builtin_connected"), 3.6)
+        return 4.4
+    def s_mesh_forget(self):
+        import os as _os
+        self.ts_embedded_forget()
+        Clock.schedule_once(lambda dt: self.shot("20_mesh_forget_confirm"), 0.9)
+        Clock.schedule_once(lambda dt: self._btn("Forget").dispatch("on_release"), 1.3)
+        def check(dt):
+            gone = not _os.path.isdir(_os.path.join(self.config_dir, "tsnet"))
+            st = self.ts_embedded_status()
+            log.append(("mesh_forget", (gone, st.get("state"))))
+            if not gone: errors.append(("mesh", "identity not removed"))
+            if st.get("state") not in ("disabled", "unavailable"): errors.append(("mesh", f"state after forget: {st.get('state')}"))
+        Clock.schedule_once(check, 5.0)
+        return 5.8
+
     # ---- System screen (diagnostics + maintenance)
     def s_system(self):
         self.go_to_screen("System")

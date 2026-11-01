@@ -241,3 +241,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.env.prod
+.env.dev
+
+# Built-in Tailscale native libraries (built in CI by tools/build_libtailscale.py)
+app/native/arm64-v8a/
+app/native/armeabi-v7a/
+native-host/
+libtailscale-src/

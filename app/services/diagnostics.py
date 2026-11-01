@@ -101,6 +101,26 @@ def build_sections(f: Dict[str, Any]) -> List[Dict[str, Any]]:
     else:
         net.append(_row("Tailscale", "Not connected", INFO))
     net.append(_row("Local address", str(f.get("local_ip") or "unknown"), INFO))
+    emb = f.get("ts_embedded")
+    if emb is not None:
+        es = emb.get("state")
+        if emb.get("available") is False or es == "unavailable":
+            net.append(_row("Built-in Tailscale", "Not included in this build", INFO))
+        elif es == "connected":
+            fw = emb.get("forwarded") or {}
+            net.append(_row("Built-in Tailscale", f"Connected as {emb.get('hostname') or '?'} ({emb.get('ip') or emb.get('ip6') or '?'}), "
+                            f"{emb.get('online_peers', 0)}/{emb.get('peer_count', 0)} peers online, {fw.get('accepted', 0)} connections served", OK))
+        elif es in ("starting",):
+            net.append(_row("Built-in Tailscale", emb.get("message") or "Connecting...", INFO))
+        elif es == "needs_auth":
+            net.append(_row("Built-in Tailscale", "Needs a key", WARN, emb.get("message") or "Enter an auth key on the Mesh screen."))
+        elif es == "needs_approval":
+            net.append(_row("Built-in Tailscale", "Waiting for admin approval", WARN, "Approve the device in the Tailscale admin console."))
+        elif es == "error":
+            net.append(_row("Built-in Tailscale", f"Problem: {emb.get('error') or 'unknown'}", ERROR,
+                            "See the engine log below (Copy report) for details."))
+        else:
+            net.append(_row("Built-in Tailscale", "Off", INFO))
     if f.get("bind") == "tailscale" and state != "connected":
         net.append(_row("Mode check", "'Tailscale only' needs Tailscale to be connected", ERROR, "Connect Tailscale or change the listening mode."))
     sections.append({"title": "Network", "rows": net})
@@ -128,7 +148,7 @@ def overall_level(sections: List[Dict[str, Any]]) -> str:
     return ERROR if ERROR in levels else WARN if WARN in levels else OK
 
 
-def to_text(sections: List[Dict[str, Any]], header: str = "OpenSMS diagnostics") -> str:
+def to_text(sections: List[Dict[str, Any]], header: str = "OpenSMS diagnostics", extra_log: str = "") -> str:
     mark = {OK: "[OK]", INFO: "[i] ", WARN: "[!] ", ERROR: "[X] "}
     lines = [header]
     for s in sections:
@@ -138,4 +158,6 @@ def to_text(sections: List[Dict[str, Any]], header: str = "OpenSMS diagnostics")
             lines.append(f"{mark[r['level']]} {r['label']}: {r['value']}")
             if r.get("hint"):
                 lines.append(f"      -> {r['hint']}")
+    if extra_log.strip():
+        lines += ["", "BUILT-IN TAILSCALE ENGINE LOG (last lines, keys redacted)"] + [f"  {l}" for l in extra_log.strip().splitlines()[-30:]]
     return "\n".join(lines)

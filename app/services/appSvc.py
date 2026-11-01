@@ -20,6 +20,7 @@ import sys
 from services.postApi import PosiApiServer, set_config_path, set_api_os, set_api_logger, accept_local_message
 from services.logSvc import LogService
 from services.reqWatch import RequestWatcher
+from services.tsEmbed import EmbeddedTailscale, EmbeddedCommands
 from services.outbox import drain_outbox
 from services.wakeLock import WakeLockController, android_wakelock_factory
 from services.lifecycle import HEARTBEAT_SECONDS, wakelock_wanted
@@ -59,6 +60,9 @@ resp_file = join(config_dir, "resp.json")
 
 ## global obj
 app_api_server = PosiApiServer()
+# Built-in Tailscale (experimental): owned by this service process so it keeps running when the app is closed
+ts_engine = EmbeddedTailscale(config_dir, log=print)
+ts_commands = EmbeddedCommands(ts_engine, config_dir)
 in_error_state = False
 bind_blocked_at = None   # when a fail-closed bind error happened (retried every 10 s)
 
@@ -118,7 +122,8 @@ def api_server_control(api_stat: str, port: int = 9292, bind_mode: str = BIND_AL
         in_error_state = False
         bind_mode = normalize_bind_mode(bind_mode)
         tailnet_ip = TailscaleService.get_status()["ip"] if bind_mode != BIND_ALL else None
-        host, bind_error = resolve_bind_host(bind_mode, tailnet_ip)
+        embedded_up = ts_engine.status()["state"] == "connected"
+        host, bind_error = resolve_bind_host(bind_mode, tailnet_ip, embedded_up)
         if bind_error:
             # Fail closed: never fall back to listening on every interface.
             api_started = False
@@ -149,6 +154,7 @@ def app_service_thread():
     global in_error_state
     global bind_blocked_at
     current_port = 9292
+    last_embedded_state = ""
     current_bind = BIND_ALL
     last_processed_cmd = None
 
@@ -161,6 +167,10 @@ def app_service_thread():
         # Heartbeat: lets the app tell a running service from a stale status file
         if time.time() - last_heartbeat >= HEARTBEAT_SECONDS:
             last_heartbeat = time.time()
+            try:
+                resp_template["ts_embedded"] = ts_engine.status()
+            except Exception as e:
+                resp_template["ts_embedded"] = {"state": "error", "error": str(e), "available": False}
             resp_template["diag"] = {      # facts only the service knows (shown on the System screen)
                 "receipts": smsReceipts.receipts_available(),
                 "wakelock": wake_lock.held,
@@ -168,6 +178,10 @@ def app_service_thread():
             }
             write_resp()
         wake_lock.update(wakelock_wanted(api_started, req_data))
+        try:
+            ts_commands.apply(req_data, int(req_data.get("port", current_port) or current_port))
+        except Exception as e:                                   # the experimental engine must never take the gateway down
+            print(f"Built-in Tailscale command error: {e}")
         try:
             drain_outbox(config_dir, accept_local_message)   # messages composed in the app
         except Exception as e:
@@ -183,7 +197,19 @@ def app_service_thread():
         current_cmd = (server_stat, requested_port, requested_bind)
 
         # Tailscale-only mode failed because no tailnet address existed: retry every 10 s so the
-        # server comes up by itself once the Tailscale app connects.
+        # server comes up by itself once the Tailscale app connects, and immediately when the
+        # built-in node becomes connected.
+        embedded_now = ts_engine.status()["state"]
+        if embedded_now == "connected" and last_embedded_state != "connected" and bind_blocked_at:
+            bind_blocked_at = 1.0                      # makes the age check below true right away
+        if embedded_now != last_embedded_state:
+            # publish engine state changes at once instead of waiting for the next heartbeat
+            try:
+                resp_template["ts_embedded"] = ts_engine.status()
+                write_resp()
+            except Exception as e:
+                print(f"Built-in Tailscale status error: {e}")
+        last_embedded_state = embedded_now
         if in_error_state and bind_blocked_at and time.time() - bind_blocked_at > 10:
             in_error_state = False
             bind_blocked_at = None

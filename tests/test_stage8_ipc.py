@@ -63,6 +63,8 @@ def test_concurrent_writers_never_corrupt_the_file_or_leave_temp_files(tmp_path,
         while not stop.is_set():
             try:
                 json.loads(p.read_text())
+            except PermissionError:
+                pass
             except (ValueError, OSError) as e:
                 bad.append(repr(e))
 

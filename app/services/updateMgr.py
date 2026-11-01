@@ -278,6 +278,7 @@ class UpdateManager:
         tmp_path = dest_path + ".tmp"
 
         headers = {"User-Agent": "OpenSMS-Downloader"}
+        cancelled = False
         try:
             with requests.get(apk_url, headers=headers, stream=True, timeout=30) as r:
                 r.raise_for_status()
@@ -287,28 +288,39 @@ class UpdateManager:
                 with open(tmp_path, "wb") as f:
                     for chunk in r.iter_content(chunk_size=65536):
                         if cancel_check and cancel_check():
-                            f.close()
-                            if os.path.exists(tmp_path):
-                                os.remove(tmp_path)
-                            return {"success": False, "error": "Download cancelled by user."}
-
+                            cancelled = True
+                            break
                         if chunk:
                             f.write(chunk)
                             digest.update(chunk)
                             downloaded += len(chunk)
-                            if total_size > 0 and progress_callback:
-                                percent = (downloaded / total_size) * 100.0
+                            if progress_callback:
+                                percent = (downloaded / total_size * 100.0) if total_size > 0 else 0.0
                                 progress_callback(percent, downloaded, total_size)
+
+                if cancelled:
+                    if os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+                    return {"success": False, "error": "Download cancelled by user."}
 
                 actual = digest.hexdigest()
                 if expected and actual != expected:
-                    f.close()
-                    os.remove(tmp_path)
+                    if os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
                     return {"success": False, "error": "Checksum mismatch: the downloaded file does not match the published SHA-256, so it was discarded."}
 
                 # Atomically replace completed download
                 if os.path.exists(dest_path):
-                    os.remove(dest_path)
+                    try:
+                        os.remove(dest_path)
+                    except OSError:
+                        pass
                 os.replace(tmp_path, dest_path)
 
             return {
@@ -388,3 +400,42 @@ class UpdateManager:
                 "success": True,
                 "message": f"Desktop simulation: update package saved at {apk_path}"
             }
+
+    @staticmethod
+    def can_install_packages() -> bool:
+        """Check if the app has permission to install unknown apps (Android 8.0+)."""
+        if platform == "android":
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                Build = autoclass('android.os.Build$VERSION')
+                if Build.SDK_INT >= 26:
+                    activity = PythonActivity.mActivity
+                    return bool(activity.getPackageManager().canRequestPackageInstalls())
+            except Exception as e:
+                print(f"canRequestPackageInstalls check failed: {e}")
+        return True
+
+    @staticmethod
+    def open_install_permission_settings() -> bool:
+        """
+        Open the Android system settings page for 'Install unknown apps' (MANAGE_UNKNOWN_APP_SOURCES).
+        Returns True if the settings activity was started, False otherwise.
+        """
+        if platform == "android":
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                Intent = autoclass('android.content.Intent')
+                Uri = autoclass('android.net.Uri')
+                activity = PythonActivity.mActivity
+                pkg = activity.getPackageName()
+                intent = Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES", Uri.parse(f"package:{pkg}"))
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                activity.startActivity(intent)
+                return True
+            except Exception as e:
+                print(f"Failed to open install permission settings: {e}")
+                return False
+        return False
+

@@ -107,7 +107,7 @@ Builder.load_string('''
 
                     MDLabel:
                         id: current_version_lbl
-                        text: "Current: v0.4.0"
+                        text: f"Current: v{app.app_version}"
                         font_style: "Label"
                         role: "medium"
                         theme_text_color: "Secondary"

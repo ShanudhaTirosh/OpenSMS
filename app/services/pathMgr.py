@@ -1,6 +1,9 @@
 import os
 import sys
+import threading
 from pathlib import Path
+
+_write_lock = threading.Lock()
 
 def get_user_data_dir(app_name: str) -> Path:
     """
@@ -36,21 +39,28 @@ def get_user_data_dir(app_name: str) -> Path:
 def atomic_write_json(file_path: str, data: dict):
     """Write data to temporary file and atomically replace to avoid corrupt reads."""
     import json
-    import threading
-    # Unique temp name per process/thread: several threads may write the same file at once (audit ARCH-01)
-    tmp_path = f"{file_path}.{os.getpid()}.{threading.get_ident()}.tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as tf:
-            json.dump(data, tf, indent=2)
-            tf.flush()
-            os.fsync(tf.fileno())
-        os.replace(tmp_path, str(file_path))
-    except Exception as e:
-        print(f"Error atomic writing {file_path}: {e}")
+    import time
+    with _write_lock:
+        tmp_path = f"{file_path}.{os.getpid()}.{threading.get_ident()}.tmp"
         try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
+            with open(tmp_path, "w", encoding="utf-8") as tf:
+                json.dump(data, tf, indent=2)
+                tf.flush()
+                os.fsync(tf.fileno())
+            for attempt in range(20):
+                try:
+                    os.replace(tmp_path, str(file_path))
+                    break
+                except PermissionError:
+                    if attempt == 19 or sys.platform != "win32":
+                        raise
+                    time.sleep(0.01)
+        except Exception as e:
+            print(f"Error atomic writing {file_path}: {e}")
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 def is_tailscale_ip(ip: str) -> bool:
     """Check if an IPv4 address belongs to Tailscale CGNAT range (100.64.0.0/10)."""

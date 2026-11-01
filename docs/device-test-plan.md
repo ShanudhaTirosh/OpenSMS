@@ -36,6 +36,25 @@ could not be compiled or run in the development sandbox. Use only numbers you ow
 | 3.1 | Batch of 20 to your own number | All `submitted` -> `sent`; API stays responsive meanwhile (`/health/`) |
 | 3.2 | 24 h idle | Service alive, no growth in open file descriptors, acceptable battery use |
 
+## 8. Built-in Tailscale (experimental; the largest unknown in the project)
+Use a pre-approved, single-use, short-expiry auth key (Tailscale admin console > Settings > Keys). Keep the System screen open in another tab: it shows the engine log.
+| # | Action | Expected |
+|---|---|---|
+| 8.0 | Install the APK. Mesh screen > Built-in Tailscale | If it says **not in this build**, the native library was not packaged: check the CI log; skip the rest |
+| 8.1 | Enter the key, tap Connect | *connecting* then **connected** within ~1 minute; the device appears in the admin console; its tailnet address is shown |
+| 8.2 | From a laptop on the tailnet: `curl http://<address>:9292/health/` (gateway running) | `{"status":"online",...}`. Then an authenticated `POST /sms/` to your own number |
+| 8.3 | Same test with the phone on **mobile data only** and the laptop on another network | Still reachable (this is the real value of the feature). Note the latency; it may be relayed |
+| 8.4 | Peers list | Your other tailnet devices appear, online first |
+| 8.5 | Close and swipe away the app; wait; repeat 8.2 | Still reachable (the engine lives in the service) |
+| 8.6 | Reboot the phone, open the app once | Reconnects **without** asking for a key |
+| 8.7 | Disconnect, then Connect again with no key | Resumes from the saved identity |
+| 8.8 | Forget, then check the admin console | Local identity gone; remove the device there too; Connect needs a new key |
+| 8.9 | Enter an expired or already-used key | *key needed* with the explanation, no crash |
+| 8.10 | Set listening mode **Tailscale only**, no Tailscale app installed | API starts (bound to loopback) and is reachable only through the built-in node, not over Wi-Fi |
+| 8.11 | With the Tailscale **app** also connected | Both work; they have different addresses |
+| 8.12 | If the node connects but 8.2 fails, or it never connects | System screen > Copy report: the engine log shows why. Typical Android-specific suspects: network-interface enumeration errors (relay-only connectivity), DNS, battery restrictions |
+| 8.13 | Leave it connected overnight; check battery and memory | Acceptable drain; no growth in memory/threads; the service is still alive in the morning |
+
 ## 7. System screen (use this first when something does not work)
 | # | Action | Expected |
 |---|---|---|

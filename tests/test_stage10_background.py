@@ -21,7 +21,11 @@ def test_desired_state(cfg, want):
 
 def test_reopening_the_app_restores_the_last_choice_instead_of_forcing_stop():
     running = initial_request({"server_desired": "start", "wakelock": False}, 9393, "tailscale")
-    assert running == {"port": 9393, "server": "start", "bind": "tailscale", "wakelock": False}
+    assert running == {"port": 9393, "server": "start", "bind": "tailscale", "wakelock": False,
+                       "ts_embedded": "down", "ts_forget_id": 0}
+    up = initial_request({"ts_embedded": "up", "ts_forget_id": 3}, 9292, "all")
+    assert up["ts_embedded"] == "up" and up["ts_forget_id"] == 3                       # the built-in node resumes after a restart
+    assert initial_request({"ts_embedded": "bogus"}, 9292, "all")["ts_embedded"] == "down"
     assert initial_request({}, 9292, "all")["server"] == "stop"
     assert initial_request({}, 9292, "all")["wakelock"] is True                     # default on
 

@@ -46,20 +46,24 @@ def normalize_bind_mode(mode) -> str:
     return mode if mode in BIND_MODES else BIND_ALL
 
 
-def resolve_bind_host(mode: str, tailnet_ip):
+def resolve_bind_host(mode: str, tailnet_ip, embedded_connected: bool = False):
     """
     Returns (host, error). Fails CLOSED: in tailscale mode without a tailnet address the server must
     not start (and must never silently fall back to listening on all interfaces).
+    With the built-in Tailscale node connected, tailnet traffic reaches the API through the node's
+    forwarder on 127.0.0.1, so "Tailscale only" simply means "loopback only".
     """
     mode = normalize_bind_mode(mode)
     if mode == BIND_ALL:
         return "0.0.0.0", None
     if mode == BIND_LOCALHOST:
         return "127.0.0.1", None
+    if embedded_connected:
+        return "127.0.0.1", None
     if tailnet_ip and ":" not in tailnet_ip and is_tailnet_address(tailnet_ip):
         return tailnet_ip, None
     return None, ("Tailscale-only mode is on but no Tailscale IPv4 address was found. "
-                  "Start the Tailscale app and connect, or choose another listening mode.")
+                  "Connect the built-in Tailscale (or start the Tailscale app), or choose another listening mode.")
 
 
 def classify(net_info: dict, vpn_networks, port=None, bind_mode: str = BIND_ALL, listening=None) -> dict:
