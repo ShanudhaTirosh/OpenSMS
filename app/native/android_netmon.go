@@ -74,3 +74,4 @@ func discoverOutboundIP(network, addr string) (netip.Addr, bool) {
 	}
 	return ip, true
 }
+

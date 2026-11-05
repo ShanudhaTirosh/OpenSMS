@@ -32,3 +32,4 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "==> Local build failed with exit code $LASTEXITCODE" -ForegroundColor Red
     exit $LASTEXITCODE
 }
+
