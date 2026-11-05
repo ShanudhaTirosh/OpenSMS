@@ -1357,7 +1357,7 @@ class OpenSmsApp(MDApp):
         self.update_home_metrics()
 
     def on_tailscale_screen_entry(self, instance=None):
-        self.screen_title = "OpenSMS • Remote Mesh"
+        self.screen_title = "OpenSMS • Mesh"
         self.root.ids.top_back_btn.opacity = 1
         self.root.ids.top_back_btn.disabled = False
         port = self.req_template.get("port", 9292)

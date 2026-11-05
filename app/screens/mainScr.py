@@ -123,9 +123,11 @@ Builder.load_string('''
                     # Tailscale Mesh Indicator Badge (Tap to view Mesh setup)
                     MDButton:
                         id: ts_badge_btn
-                        style: "tonal"
+                        style: "outlined"
                         theme_bg_color: "Custom"
-                        md_bg_color: [0.1, 0.7, 0.3, 0.15] if root.has_tailscale else ([0.8, 0.2, 0.2, 0.1] if app.theme_style == "Light" else [0.35, 0.15, 0.15, 0.6])
+                        md_bg_color: [0.93, 0.98, 0.94, 1] if root.has_tailscale else ([0.98, 0.93, 0.93, 1] if app.theme_style == "Light" else [0.24, 0.16, 0.16, 1])
+                        theme_line_color: "Custom"
+                        line_color: [0.3, 0.75, 0.4, 0.7] if root.has_tailscale else ([0.85, 0.35, 0.35, 0.7] if app.theme_style == "Light" else [0.65, 0.28, 0.28, 0.7])
                         on_release: app.goto_tailscale_screen()
                         adaptive_height: True
                         size_hint_x: 1
@@ -134,7 +136,7 @@ Builder.load_string('''
                             id: ts_chip_icon
                             icon: "shield-check" if root.has_tailscale else "shield-off"
                             theme_icon_color: "Custom"
-                            icon_color: [0.1, 0.75, 0.35, 1] if root.has_tailscale else [0.85, 0.3, 0.3, 1]
+                            icon_color: [0.12, 0.65, 0.28, 1] if root.has_tailscale else ([0.82, 0.18, 0.18, 1] if app.theme_style == "Light" else [0.98, 0.45, 0.45, 1])
                             pos_hint: {"center_y": 0.5}
 
                         MDButtonText:
@@ -143,7 +145,7 @@ Builder.load_string('''
                             font_style: "Label"
                             role: "medium"
                             theme_text_color: "Custom"
-                            text_color: [0.1, 0.6, 0.25, 1] if root.has_tailscale else ([0.75, 0.2, 0.2, 1] if app.theme_style == "Light" else [0.95, 0.5, 0.5, 1])
+                            text_color: [0.12, 0.55, 0.22, 1] if root.has_tailscale else ([0.78, 0.12, 0.12, 1] if app.theme_style == "Light" else [0.98, 0.55, 0.55, 1])
                             pos_hint: {"center_y": 0.5}
 
                     MDLabel:

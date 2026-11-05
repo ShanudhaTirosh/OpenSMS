@@ -275,6 +275,7 @@ class MessagesBox(MDBoxLayout):
         self.has_more = data["has_more"]
         self.range_text = data["range_text"]
         if not self.rows:
+            self.range_text = ""
             searching = bool(self.search_text or self.status_filter != "all")
             box.add_widget(EmptyState(
                 icon="magnify" if searching else "message-text-outline",
