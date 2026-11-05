@@ -1,10 +1,25 @@
 """
 OpenSMS - Python-for-Android Patch Helper
-Ensures that Rust/Maturin builds (like pydantic-core) receive the correct
-ANDROID_API_LEVEL and ANDROID_MINAPI during cross-compilation.
+1. Ensures that Rust/Maturin builds (like pydantic-core) receive the correct
+   ANDROID_API_LEVEL and ANDROID_MINAPI during cross-compilation.
+2. Injects the androidx FileProvider declaration inside <application> in
+   AndroidManifest.tmpl.xml so in-app APK updates install smoothly via FileProvider.
 """
 import os
 import sys
+
+
+FILE_PROVIDER_XML = """
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="{{ args.package }}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>"""
 
 
 def patch_p4a(p4a_dir: str):
@@ -45,6 +60,24 @@ def patch_p4a(p4a_dir: str):
             print(f"[patch_p4a] Patched {archs_path} with ANDROID_API_LEVEL propagation.")
         else:
             print(f"[patch_p4a] {archs_path} already patched or target not found.")
+
+    # Patch AndroidManifest templates
+    for root, _, files in os.walk(p4a_dir):
+        for file in files:
+            if file == "AndroidManifest.tmpl.xml":
+                tmpl_path = os.path.join(root, file)
+                try:
+                    with open(tmpl_path, "r", encoding="utf-8") as f:
+                        tmpl_content = f.read()
+                    if "androidx.core.content.FileProvider" not in tmpl_content and "</application>" in tmpl_content:
+                        tmpl_content = tmpl_content.replace("</application>", FILE_PROVIDER_XML, 1)
+                        with open(tmpl_path, "w", encoding="utf-8") as f:
+                            f.write(tmpl_content)
+                        print(f"[patch_p4a] Injected FileProvider into {tmpl_path}.")
+                    else:
+                        print(f"[patch_p4a] {tmpl_path} already patched or no </application> tag.")
+                except Exception as e:
+                    print(f"[patch_p4a] Failed patching {tmpl_path}: {e}")
 
 
 if __name__ == "__main__":
