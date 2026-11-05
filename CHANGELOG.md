@@ -2,6 +2,29 @@
 
 ## Changes
 
+### 0.5.3 (2026-11-05)
+
+#### SMS Delivery Tracking & Status Pipeline
+- **Fixed SMS Sent & Delivery Receipt Broadcasts**: Resolved Android Intent matching issue where PendingIntents carrying `opensms://...` data URIs were dropped by dynamic `IntentFilters` lacking `<data>` scheme registration. Configured `addDataScheme("opensms")`, fallback action filters, and distinct PendingIntent request codes per part/kind. Messages now accurately transition through `queued` $\to$ `submitted` $\to$ `sent` $\to$ `delivered`.
+- **API Response Clarity**: Updated `/sms/` endpoints to return distinct, accurate messages for `submitted`, `sent`, and `delivered` states.
+
+#### Live Home Screen Tailscale State
+- **Added `on_resume` Lifecycle Refresh**: Implemented `on_resume()` in `MDApp` and scheduled a live 5-second periodic refresh so connection status and network IP addresses automatically refresh when switching back from the Tailscale app or other applications.
+- **Embedded & Mesh Detection**: Integrated built-in Tailscale (`ts_embedded`) engine state with system VPN detection so the home screen status chip, icon, and endpoint labels display live connectivity across all operating modes.
+
+#### UI/UX Polish & Responsive Layout
+- **Fixed Clipped Buttons on Remote Mesh Screen**: Replaced rigid 3-column layout in API listening mode with a clean, responsive multi-row layout so "This phone only (Localhost)" and surrounding controls never overflow or get clipped on narrow screens.
+- **Flexible Quick Operations & Button Feedback**: Streamlined Quick Operations buttons on Home screen to fit mobile screens cleanly. Upgraded `ButtonControl` with proper RGBA Material colors and feedback for start, stop, error, and loading states.
+
+#### Input Field Configuration
+- **Specialized Keyboards & IME Configuration**: Set `input_type="tel"` on phone inputs (Test SMS dialog and Compose screen), `input_type="number"` on server port inputs, and `input_type="text"` / `input_type="url"` on Tailscale and search fields.
+
+#### In-App Updater & Persistent Signing Keystore
+- **Fixed Install-Over-Existing Bug**: Configured GitHub Actions release pipeline to cache and persist the fallback signing keystore with a 10,000-day certificate, eliminating signature mismatches between versions.
+- **FileProvider Configuration**: Declared `androidx.core.content.FileProvider` in `app/buildozer.spec` and `app/extra_manifest_application_arguments.xml` with `file_paths.xml` resource mapping.
+- **Install Permission Guard**: Added `canRequestPackageInstalls()` check directing the user to Android Settings (`ACTION_MANAGE_UNKNOWN_APP_SOURCES`) when required.
+- **Monotonic Version Code**: Set `android.numeric_version = 503` ensuring strictly increasing version codes.
+
 ### 0.5.2 (2026-11-05)
 
 #### Built-in Tailscale Engine (Android 11+ Sandbox Compatibility)

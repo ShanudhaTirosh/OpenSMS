@@ -214,7 +214,7 @@ class ApiKeysBox(MDBoxLayout):
         state = {"scopes": {"sms:write", "sms:read"}}
 
         name_field = MDTextField(MDTextFieldHintText(text="Key name (e.g. Home server)"), mode="outlined",
-                                 size_hint_y=None, height=dp(56))
+                                 input_type="text", size_hint_y=None, height=dp(56))
         error_lbl = MDLabel(text="", theme_text_color="Custom", text_color=(0.85, 0.25, 0.25, 1),
                             font_style="Label", role="medium", adaptive_height=True)
         note_lbl = MDLabel(text="", theme_text_color="Secondary", font_style="Label", role="medium", adaptive_height=True)

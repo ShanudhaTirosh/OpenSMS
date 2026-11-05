@@ -191,6 +191,7 @@ Builder.load_string('''
                     MDTextField:
                         id: port_no_inp
                         mode: "filled"
+                        input_type: "number"
                         input_filter: 'int'
                         max_text_length: 5
                         size_hint_x: 0.35

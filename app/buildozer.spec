@@ -189,7 +189,7 @@ android.accept_sdk_license = True
 
 # (str) Extra xml to write directly inside the <manifest><application> tag of AndroidManifest.xml
 # use that parameter to provide a filename from where to load your custom XML arguments:
-#android.extra_manifest_application_arguments = ./src/android/extra_manifest_application_arguments.xml
+android.extra_manifest_application_arguments = %(source.dir)s/extra_manifest_application_arguments.xml
 
 # (str) Full name including package path of the Java class that implements Python Service
 # use that parameter to set custom Java class which extends PythonService
@@ -280,7 +280,7 @@ android.enable_androidx = True
 #android.manifest.intent_filters =
 
 # (list) Copy these files to src/main/res/xml/ (used for example with intent-filters)
-#android.res_xml = PATH_TO_FILE,
+android.res_xml = %(source.dir)s/res/xml/file_paths.xml
 
 # (str) launchMode to set for the main activity
 #android.manifest.launch_mode = standard
@@ -328,7 +328,7 @@ android.archs = armeabi-v7a, arm64-v8a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # this is not the same as app version and should only be edited if you know what you're doing
-# android.numeric_version = 1
+android.numeric_version = 503
 
 # (bool) enables Android auto backup feature (Android API >=23). Disabled: config/ and opensms.db hold message bodies and settings (audit SEC-05)
 android.allow_backup = False

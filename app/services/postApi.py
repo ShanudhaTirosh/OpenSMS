@@ -533,10 +533,17 @@ async def _send_single(item: SmsData, request: Request, client: dict):
 
     log_activities(f"SMS handed to telephony for: {mask_phone(item.number)} (id: {msg_id})")
     _notify_ui(request, True, 1)
+    status_str = outcome["status"]
+    if status_str == "delivered":
+        resp_msg = f"SMS delivered to {item.number}"
+    elif status_str == "sent":
+        resp_msg = f"SMS accepted by carrier network for {item.number}"
+    else:
+        resp_msg = f"SMS submitted to the telephony service for {item.number} (delivery not confirmed)"
     return {
-        "stat": True, "id": msg_id, "status": outcome["status"],
-        "delivery_confirmed": outcome["status"] == "delivered",
-        "message": f"SMS submitted to the telephony service for {item.number} (delivery not confirmed)",
+        "stat": True, "id": msg_id, "status": status_str,
+        "delivery_confirmed": status_str == "delivered",
+        "message": resp_msg,
         "recipient": item.number, "segments": seg_info["segments"], "encoding": seg_info["encoding"],
     }
 

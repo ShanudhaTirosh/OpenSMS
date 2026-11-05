@@ -12,13 +12,20 @@ Builder.load_string('''
 <ButtonControl>
     pos_hint: {"center_x": .5}
     theme_bg_color: "Custom"
-    md_bg_color: self.btn_colour
+    md_bg_color: root.btn_colour
+    size_hint_y: None
+    height: dp(52)
+    radius: [dp(26)]
     MDButtonIcon:
         icon: root.btn_icon
-        color: "white"
+        theme_icon_color: "Custom"
+        icon_color: "white"
     MDButtonText:
         text: root.btn_txt
-        color: "white"
+        theme_text_color: "Custom"
+        text_color: "white"
+        font_style: "Title"
+        role: "medium"
 
 <AppHomeBox>:
     orientation: 'vertical'
@@ -292,14 +299,15 @@ Builder.load_string('''
                     role: "small"
                     adaptive_height: True
 
-                MDBoxLayout:
-                    orientation: 'horizontal'
+                MDGridLayout:
+                    cols: 3
                     adaptive_height: True
-                    spacing: dp(8)
-                    pos_hint: {"center_x": 0.5}
+                    spacing: dp(6)
+                    size_hint_x: 1
 
                     MDButton:
                         style: "tonal"
+                        size_hint_x: 0.33
                         on_release: app.show_test_sms_dialog()
                         MDButtonIcon:
                             icon: "send"
@@ -308,14 +316,16 @@ Builder.load_string('''
 
                     MDButton:
                         style: "tonal"
+                        size_hint_x: 0.33
                         on_release: app.goto_tailscale_screen()
                         MDButtonIcon:
                             icon: "shield-account-outline"
                         MDButtonText:
-                            text: "Remote Mesh"
+                            text: "Mesh"
 
                     MDButton:
                         style: "tonal"
+                        size_hint_x: 0.33
                         on_release: app.check_for_updates_manually()
                         MDButtonIcon:
                             icon: "cloud-search-outline"
@@ -339,4 +349,4 @@ class AppHomeBox(MDBoxLayout):
 class ButtonControl(MDButton):
     btn_icon = StringProperty("play")
     btn_txt = StringProperty("Start Server")
-    btn_colour = StringProperty("green")
+    btn_colour = ColorProperty([0.12, 0.68, 0.38, 1.0])

@@ -115,13 +115,22 @@ def register_receiver(callback: Callable[[str, str, int, Optional[bool], Optiona
         listener = _Listener()
         SmsResultReceiver.setListener(listener)
         receiver = SmsResultReceiver()
-        flt = IntentFilter()
-        flt.addAction(ACTION_SENT)
-        flt.addAction(ACTION_DELIVERED)
+
+        flt_data = IntentFilter()
+        flt_data.addAction(ACTION_SENT)
+        flt_data.addAction(ACTION_DELIVERED)
+        flt_data.addDataScheme("opensms")
+
+        flt_action = IntentFilter()
+        flt_action.addAction(ACTION_SENT)
+        flt_action.addAction(ACTION_DELIVERED)
+
         if Build.SDK_INT >= 33:
-            context.registerReceiver(receiver, flt, Context.RECEIVER_NOT_EXPORTED)
+            context.registerReceiver(receiver, flt_data, Context.RECEIVER_NOT_EXPORTED)
+            context.registerReceiver(receiver, flt_action, Context.RECEIVER_NOT_EXPORTED)
         else:
-            context.registerReceiver(receiver, flt)
+            context.registerReceiver(receiver, flt_data)
+            context.registerReceiver(receiver, flt_action)
         _state.update(registered=True, listener=listener, receiver=receiver)
         return True
     except Exception as e:
@@ -154,7 +163,10 @@ def build_pending_intents(msg_id: str, n_parts: int):
             intent = Intent(action)
             intent.setPackage(context.getPackageName())
             intent.setData(Uri.parse(f"opensms://receipt/{msg_id}/{part}/{kind}"))
-            intent.putExtra("msg_id", msg_id)
-            intent.putExtra("part", part)
-            target.add(PendingIntent.getBroadcast(context, 0, intent, flags))
+            intent.putExtra("msg_id", str(msg_id))
+            intent.putExtra("part", int(part))
+            intent.putExtra("kind", str(kind))
+            # Unique request code ensures Android treats sent vs delivered and multiple parts as distinct PendingIntents
+            req_code = (abs(hash(f"{msg_id}_{part}_{kind}")) & 0x7FFFFFFF)
+            target.add(PendingIntent.getBroadcast(context, req_code, intent, flags))
     return sent_list, delivery_list

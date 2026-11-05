@@ -351,6 +351,28 @@ class UpdateManager:
 
         if platform == "android":
             try:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                Build = autoclass('android.os.Build$VERSION')
+                activity = PythonActivity.mActivity
+                if activity and Build.SDK_INT >= 26:
+                    pm = activity.getPackageManager()
+                    if not pm.canRequestPackageInstalls():
+                        Settings = autoclass('android.provider.Settings')
+                        Uri = autoclass('android.net.Uri')
+                        Intent = autoclass('android.content.Intent')
+                        intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                        intent.setData(Uri.parse(f"package:{activity.getPackageName()}"))
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        activity.startActivity(intent)
+                        return {
+                            "success": False,
+                            "error": "Please allow OpenSMS to install unknown apps in the Android Settings screen that just opened, then try updating again."
+                        }
+            except Exception as e:
+                print(f"Notice: canRequestPackageInstalls check: {e}")
+
+            try:
                 _install_via_package_installer(apk_path, on_status)
                 return {"success": True, "message": "Waiting for Android's install confirmation..."}
             except Exception as e:

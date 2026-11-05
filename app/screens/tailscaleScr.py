@@ -55,6 +55,7 @@ Builder.load_string('''
                 MDTextField:
                     id: emb_key
                     mode: "outlined"
+                    input_type: "text"
                     password: True
                     size_hint_y: None
                     height: dp(56) if root.emb_can_connect else 0
@@ -67,6 +68,7 @@ Builder.load_string('''
                 MDTextField:
                     id: emb_host
                     mode: "outlined"
+                    input_type: "text"
                     size_hint_y: None
                     height: dp(56) if root.emb_can_connect else 0
                     opacity: 1 if root.emb_can_connect else 0
@@ -78,6 +80,7 @@ Builder.load_string('''
                 MDTextField:
                     id: emb_ctrl
                     mode: "outlined"
+                    input_type: "url"
                     size_hint_y: None
                     height: dp(56) if root.emb_can_connect else 0
                     opacity: 1 if root.emb_can_connect else 0
@@ -86,13 +89,14 @@ Builder.load_string('''
                     MDTextFieldHintText:
                         text: "Control server URL (optional, e.g. Headscale)"
 
-                MDGridLayout:
-                    cols: 3
+                MDBoxLayout:
+                    orientation: 'horizontal'
                     adaptive_height: True
                     spacing: dp(6)
 
                     MDButton:
                         style: "filled"
+                        size_hint_x: 0.4
                         disabled: not root.emb_can_connect
                         on_release: root.emb_connect()
                         MDButtonText:
@@ -100,6 +104,7 @@ Builder.load_string('''
 
                     MDButton:
                         style: "outlined"
+                        size_hint_x: 0.35
                         disabled: not root.emb_can_disconnect
                         on_release: app.ts_embedded_disconnect()
                         MDButtonText:
@@ -107,6 +112,7 @@ Builder.load_string('''
 
                     MDButton:
                         style: "text"
+                        size_hint_x: 0.25
                         disabled: not root.emb_can_forget
                         on_release: app.ts_embedded_forget()
                         MDButtonText:
@@ -149,28 +155,36 @@ Builder.load_string('''
                     theme_text_color: "Secondary"
                     adaptive_height: True
 
-                MDGridLayout:
-                    cols: 3
+                MDBoxLayout:
+                    orientation: 'vertical'
                     adaptive_height: True
                     spacing: dp(8)
 
-                    MDButton:
-                        style: "filled" if root.bind_mode == "all" else "outlined"
-                        on_release: app.set_bind_mode("all")
-                        MDButtonText:
-                            text: "All networks"
+                    MDBoxLayout:
+                        orientation: 'horizontal'
+                        adaptive_height: True
+                        spacing: dp(8)
 
-                    MDButton:
-                        style: "filled" if root.bind_mode == "tailscale" else "outlined"
-                        on_release: app.set_bind_mode("tailscale")
-                        MDButtonText:
-                            text: "Tailscale only"
+                        MDButton:
+                            style: "filled" if root.bind_mode == "all" else "outlined"
+                            size_hint_x: 0.5
+                            on_release: app.set_bind_mode("all")
+                            MDButtonText:
+                                text: "All networks"
+
+                        MDButton:
+                            style: "filled" if root.bind_mode == "tailscale" else "outlined"
+                            size_hint_x: 0.5
+                            on_release: app.set_bind_mode("tailscale")
+                            MDButtonText:
+                                text: "Tailscale only"
 
                     MDButton:
                         style: "filled" if root.bind_mode == "localhost" else "outlined"
+                        size_hint_x: 1
                         on_release: app.set_bind_mode("localhost")
                         MDButtonText:
-                            text: "This phone"
+                            text: "This phone only (Localhost)"
 
             # Tailscale Hero Status Card
             MDBoxLayout:

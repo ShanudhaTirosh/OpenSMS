@@ -253,6 +253,9 @@ class OpenSmsApp(MDApp):
         self.update_network_addresses()
         self.update_home_metrics()
 
+        # Periodically refresh network status & Tailscale state
+        Clock.schedule_interval(lambda dt: self.update_network_addresses(), 5.0)
+
         # Check for updates automatically in background if enabled
         if self.config_template.get("auto_update", True):
             Clock.schedule_once(lambda dt: Thread(target=self.check_for_updates_background, daemon=True).start(), 2.0)
@@ -260,23 +263,52 @@ class OpenSmsApp(MDApp):
         Thread(target=self.resp_check_loop, daemon=True).start()
         print("Init success...")
 
+    def on_resume(self):
+        """Called when returning from background or switching back from another app."""
+        self.update_network_addresses()
+        self.update_home_metrics()
+        if hasattr(self, "root") and self.root:
+            try:
+                if "messages_scr" in self.root.ids:
+                    self.root.ids.messages_scr.reload(quiet=True)
+                if "tailscale_scr" in self.root.ids:
+                    self.root.ids.tailscale_scr.update_tailscale_info()
+            except Exception as e:
+                print(f"Notice on_resume refresh: {e}")
+
     def update_network_addresses(self):
         """Find local Wi-Fi, Ethernet, and VPN IP addresses, prioritizing Tailscale."""
         self.detected_ips = get_device_ip_addresses()
         port = self.req_template.get("port", 9292)
         ts_status = TailscaleService.get_status()
+        emb_status = self.ts_embedded_status()
+        emb_connected = emb_status.get("state") == "connected"
+        emb_ip = emb_status.get("ip") or (emb_status.get("addresses") or [None])[0]
+
+        is_ts_connected = bool(ts_status.get("connected") or emb_connected)
+        active_ts_ip = ts_status.get("ip") or (emb_ip if emb_connected else None)
+
         preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port, self.config_template.get('bind_mode', BIND_ALL))
-        all_ips = ts_status.get("all_ips") or self.detected_ips
+        if emb_connected and emb_ip and not ts_status.get("connected"):
+            net_type = "Tailscale (embedded)"
+            preferred_endpoint = f"http://{emb_ip}:{port}/sms/"
+
+        all_ips = list(ts_status.get("all_ips") or self.detected_ips)
+        if emb_ip and emb_ip not in all_ips:
+            all_ips.append(emb_ip)
         ip_label_text = ", ".join(all_ips)
 
         try:
             home_scr = self.root.ids.home_scr
             home_scr.is_online = self.api_started
-            home_scr.has_tailscale = ts_status["connected"]
+            home_scr.has_tailscale = is_ts_connected
 
             if "ts_chip_lbl" in home_scr.ids:
-                if ts_status["connected"]:
-                    home_scr.ids.ts_chip_lbl.text = f"Tailscale Mesh: Connected ({ts_status['ip']})"
+                if is_ts_connected and active_ts_ip:
+                    source_label = "Built-in" if emb_connected and not ts_status.get("connected") else "Mesh"
+                    home_scr.ids.ts_chip_lbl.text = f"Tailscale {source_label}: Connected ({active_ts_ip})"
+                elif is_ts_connected:
+                    home_scr.ids.ts_chip_lbl.text = "Tailscale Mesh: Connected"
                 else:
                     home_scr.ids.ts_chip_lbl.text = "Tailscale: Not connected (Tap to connect)"
 
@@ -342,7 +374,7 @@ class OpenSmsApp(MDApp):
                                 home.ids.api_port_sublbl.text = f"Listening on Port {port} • Ready"
                                 home.ids.api_srv_btn.btn_icon = "stop"
                                 home.ids.api_srv_btn.btn_txt = "Stop Server"
-                                home.ids.api_srv_btn.btn_colour = "orange"
+                                home.ids.api_srv_btn.btn_colour = [0.85, 0.42, 0.12, 1.0]
                                 if "status_icon" in home.ids:
                                     home.ids.status_icon.icon = "check-circle"
                                 if "api_endpoint_lbl" in home.ids:
@@ -364,7 +396,7 @@ class OpenSmsApp(MDApp):
                                 home.ids.api_port_sublbl.text = f"Port {port} • Tap Start Server below"
                                 home.ids.api_srv_btn.btn_icon = "play"
                                 home.ids.api_srv_btn.btn_txt = "Start Server"
-                                home.ids.api_srv_btn.btn_colour = "green"
+                                home.ids.api_srv_btn.btn_colour = [0.12, 0.68, 0.38, 1.0]
                                 if "status_icon" in home.ids:
                                     home.ids.status_icon.icon = "cellphone-wireless"
                                 self.show_toast_msg("API Server Stopped")
@@ -381,7 +413,7 @@ class OpenSmsApp(MDApp):
                                 home.ids.api_port_sublbl.text = f"Error: {error_detail}"
                                 home.ids.api_srv_btn.btn_icon = "play"
                                 home.ids.api_srv_btn.btn_txt = "Start Server"
-                                home.ids.api_srv_btn.btn_colour = "green"
+                                home.ids.api_srv_btn.btn_colour = [0.12, 0.68, 0.38, 1.0]
                                 self.show_toast_msg(f"Server Error: {error_detail}", is_error=True)
                             Clock.schedule_once(update_error_ui)
 
@@ -915,7 +947,8 @@ class OpenSmsApp(MDApp):
         from kivymd.uix.label import MDLabel
         phone_input = MDTextField(
             mode="outlined",
-            hint_text="Phone Number (e.g. +1234567890)",
+            hint_text="Phone Number (e.g. +94755953683)",
+            input_type="tel",
             text="",
             size_hint_y=None,
             height=dp(56)
@@ -923,9 +956,11 @@ class OpenSmsApp(MDApp):
         msg_input = MDTextField(
             mode="outlined",
             hint_text="Message text",
+            input_type="text",
+            multiline=True,
             text="Hello from OpenSMS test!",
             size_hint_y=None,
-            height=dp(56)
+            height=dp(72)
         )
 
         calc_init = calculate_sms_segments(msg_input.text)

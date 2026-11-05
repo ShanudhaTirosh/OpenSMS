@@ -100,6 +100,12 @@ jobs:
             zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 \
             cmake libffi-dev libssl-dev ccache libjpeg-dev libcairo2-dev
 
+      - name: Cache debug/fallback keystore (stable signature across releases)
+        uses: actions/cache@v4
+        with:
+          path: ~/.android
+          key: android-signing-keystore-v1-${{ github.repository }}
+
       - name: Cache Buildozer global directories
         uses: actions/cache@v4
         with:
@@ -174,6 +180,11 @@ jobs:
         if: steps.signing.outputs.signed != 'true'
         working-directory: app
         run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            echo "Generating persistent fallback keystore..."
+            keytool -genkey -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=OpenSMS,O=OpenSMS,C=US"
+          fi
           buildozer android debug
 
       - name: Checksums and certificate fingerprint

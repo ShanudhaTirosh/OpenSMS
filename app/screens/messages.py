@@ -82,6 +82,7 @@ Builder.load_string('''
         MDTextField:
             id: search_inp
             mode: "outlined"
+            input_type: "text"
             size_hint_y: None
             height: dp(56)
             on_text: root.on_search_text(self.text)
@@ -302,9 +303,9 @@ class MessagesBox(MDBoxLayout):
         if hasattr(app, "require_gateway_service") and not app.require_gateway_service():
             return
         number_field = MDTextField(MDTextFieldHintText(text="Phone number (e.g. +94771234567)"), mode="outlined",
-                                   text=number, size_hint_y=None, height=dp(56))
+                                   input_type="tel", text=number, size_hint_y=None, height=dp(56))
         text_field = MDTextField(MDTextFieldHintText(text="Message"), mode="outlined", text=text,
-                                 multiline=True, size_hint_y=None, height=dp(112))
+                                 input_type="text", multiline=True, size_hint_y=None, height=dp(112))
         counter = MDLabel(text="", theme_text_color="Secondary", font_style="Label", role="medium", adaptive_height=True)
         error = MDLabel(text="", theme_text_color="Custom", text_color=(0.85, 0.25, 0.25, 1),
                         font_style="Label", role="medium", adaptive_height=True)
