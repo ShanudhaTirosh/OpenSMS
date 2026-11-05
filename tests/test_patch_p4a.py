@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
-from patch_p4a import patch_p4a, FILE_PROVIDER_XML
+from patch_p4a import patch_p4a
 
 
 def test_patch_p4a_manifest_injection(tmp_path):
