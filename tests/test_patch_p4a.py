@@ -36,3 +36,4 @@ def test_patch_p4a_manifest_injection(tmp_path):
     # Running a second time should be idempotent
     patch_p4a(str(p4a_dir))
     assert result.count("androidx.core.content.FileProvider") == 1
+
