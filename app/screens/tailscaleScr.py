@@ -54,7 +54,7 @@ Builder.load_string('''
 
                 MDTextField:
                     id: emb_key
-                    mode: "outlined"
+                    mode: "filled"
                     input_type: "text"
                     password: True
                     size_hint_y: None
@@ -67,7 +67,7 @@ Builder.load_string('''
 
                 MDTextField:
                     id: emb_host
-                    mode: "outlined"
+                    mode: "filled"
                     input_type: "text"
                     size_hint_y: None
                     height: dp(56) if root.emb_can_connect else 0
@@ -79,7 +79,7 @@ Builder.load_string('''
 
                 MDTextField:
                     id: emb_ctrl
-                    mode: "outlined"
+                    mode: "filled"
                     input_type: "url"
                     size_hint_y: None
                     height: dp(56) if root.emb_can_connect else 0

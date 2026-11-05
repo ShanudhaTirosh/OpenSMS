@@ -328,7 +328,7 @@ android.archs = armeabi-v7a, arm64-v8a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # this is not the same as app version and should only be edited if you know what you're doing
-android.numeric_version = 503
+android.numeric_version = 504
 
 # (bool) enables Android auto backup feature (Android API >=23). Disabled: config/ and opensms.db hold message bodies and settings (audit SEC-05)
 android.allow_backup = False

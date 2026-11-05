@@ -2,6 +2,17 @@
 
 ## Changes
 
+### 0.5.4 (2026-11-05)
+
+#### Package Installation & In-App Updater
+- **Monotonic Version Code Increment (504)**: Incremented `android.numeric_version` to `504` to resolve Android's `INSTALL_FAILED_VERSION_DOWNGRADE` (`STATUS_FAILURE_INVALID`), which causes the system dialog "App not installed as package appears to be invalid" when attempting to install an APK with the same or lower version code over an existing installation.
+- **Enhanced `PackageInstaller.SessionParams`**: Configured `params.setAppPackageName(package)` and `params.setSize(size)` during in-app update streaming sessions so Android's package manager pre-allocates resources and targets updates accurately.
+- **Improved Failure Guidance**: Added clearer messaging for `STATUS_FAILURE_INVALID` advising that updates require a higher version code than the installed build.
+
+#### UI/UX Refinements
+- **Remote Mesh Input Fields**: Updated `emb_key`, `emb_host`, and `emb_ctrl` text fields on the Remote Mesh screen to `mode: "filled"` to prevent floating label overlap and border clipping artifacts on colored surface cards.
+- **Settings Server Port Input**: Updated `port_no_inp` styling with fixed width and centered text alignment (`halign: "center"`) preventing 4-digit port numbers (e.g. `9292`) from being squeezed or clipped against list item edges.
+
 ### 0.5.3 (2026-11-05)
 
 #### SMS Delivery Tracking & Status Pipeline

@@ -78,7 +78,7 @@ _INSTALL_STATUS = {
     1: ("error", "Android could not install the update."),
     2: ("error", "Android blocked the installation. Allow OpenSMS to install apps in Settings, then try again."),
     3: ("error", "The installation was cancelled."),
-    4: ("error", "Android rejected the APK as invalid or corrupt."),
+    4: ("error", "Android rejected the update package. Ensure the update has a newer version code than the installed app."),
     5: ("error", "The update conflicts with the installed app, usually because it was signed with a different key "
                  "(for example a debug build over a release build). Uninstall OpenSMS and install the new APK; "
                  "local data is lost."),
@@ -164,7 +164,13 @@ def _install_via_package_installer(apk_path: str, on_status) -> None:
         _installer.update(listener=listener, receiver=receiver, registered=True)
 
     installer = activity.getPackageManager().getPackageInstaller()
-    session_id = installer.createSession(SessionParams(SessionParams.MODE_FULL_INSTALL))
+    params = SessionParams(SessionParams.MODE_FULL_INSTALL)
+    try:
+        params.setAppPackageName(package)
+        params.setSize(os.path.getsize(apk_path))
+    except Exception as e:
+        print(f"Notice setting session params: {e}")
+    session_id = installer.createSession(params)
     session = installer.openSession(session_id)
     try:
         out = session.openWrite("opensms-update.apk", 0, os.path.getsize(apk_path))

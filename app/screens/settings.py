@@ -194,7 +194,9 @@ Builder.load_string('''
                         input_type: "number"
                         input_filter: 'int'
                         max_text_length: 5
-                        size_hint_x: 0.35
+                        size_hint_x: None
+                        width: dp(90)
+                        halign: "center"
                         pos_hint: {"center_y": 0.5}
 
                 # Wake Lock
