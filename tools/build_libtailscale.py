@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -81,6 +82,9 @@ def build_android(src: Path, out: Path, ndk: Path, abis: List[str]) -> List[str]
     out = out.resolve()
     ndk = ndk.resolve()
     verify_header(src)
+    android_compat = ROOT / "app" / "native" / "android_netmon.go"
+    if android_compat.exists():
+        shutil.copy2(android_compat, src / "android_netmon.go")
     built = []
     for abi in abis:
         clang = ndk_clang(ndk, abi)

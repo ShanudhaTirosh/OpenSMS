@@ -2,6 +2,11 @@
 
 ## Changes
 
+### 0.5.2 (2026-11-05)
+
+#### Built-in Tailscale Engine (Android 11+ Sandbox Compatibility)
+- **Fixed `route ip+net: netlinkrib: permission denied`**: Starting with Android 11 (API 30+), untrusted applications in the Android sandbox are denied direct access to `NETLINK_ROUTE` sockets. Added `app/native/android_netmon.go` providing a custom interface fallback using UDP routing queries and enabling `androiddns` so `tsnet` starts up seamlessly without crashing on netlink permission restrictions.
+
 ### 0.5.1 (2026-11-01)
 
 #### Built-in Tailscale Engine & Lifecycle (Experimental)
