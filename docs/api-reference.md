@@ -4,7 +4,7 @@ The OpenSMS REST API allows applications, backends, scripts, and AI agents to di
 
 - **Base URL**: `http://<DEVICE_IP>:9292` (Port default: `9292`, configurable in Settings)
 - **Content-Type**: `application/json`
-- **Current App Version**: `0.4.0`
+- **Current App Version**: `0.5.5`
 
 ---
 
@@ -224,12 +224,20 @@ Returns live gateway operational metrics, Sent Today counters, success rate perc
 ```json
 {
   "app": "OpenSMS",
-  "version": "0.4.0",
+  "version": "0.5.5",
   "metrics": {
     "sent_today": 142,
     "failed_today": 1,
     "success_rate": 99.3,
     "queue_depth": 0
+  },
+  "battery": {
+    "available": true,
+    "percentage": 88,
+    "charging": true,
+    "plugged": true,
+    "power_source": "ac",
+    "status": "charging"
   }
 }
 ```
@@ -303,9 +311,65 @@ Unauthenticated ping endpoint used by load balancers, container orchestrators, a
 {
   "status": "ok",
   "service": "OpenSMS",
-  "version": "0.4.0"
+  "version": "0.5.5"
 }
 ```
+
+---
+
+### 9. Manage Webhooks
+Subscribe external HTTP/HTTPS endpoints to real-time SMS delivery events (`sms.submitted`, `sms.sent`, `sms.delivered`, `sms.failed`).
+
+- **Scopes**: `admin`
+
+#### List Webhooks
+- **Method**: `GET`
+- **Path**: `/webhooks/`
+
+```json
+{
+  "count": 1,
+  "webhooks": [
+    {
+      "id": "e4f5a6b7-8c9d-4e5f-a6b7-8c9d4e5f6a7b",
+      "url": "https://example.com/api/sms-callback",
+      "events": ["sms.delivered", "sms.failed"],
+      "has_secret": true,
+      "is_active": 1,
+      "created_at": 1732123456.78
+    }
+  ]
+}
+```
+
+#### Register Webhook
+- **Method**: `POST`
+- **Path**: `/webhooks/`
+- **Request Body**:
+```json
+{
+  "url": "https://example.com/api/sms-callback",
+  "events": ["sms.delivered", "sms.failed"],
+  "secret": "your-hmac-secret-key"
+}
+```
+
+#### Delete Webhook
+- **Method**: `DELETE`
+- **Path**: `/webhooks/{webhook_id}`
+
+#### Test Webhook Delivery
+- **Method**: `POST`
+- **Path**: `/webhooks/test/{webhook_id}`
+- Sends an immediate `webhook.test` ping to verify endpoint connectivity.
+
+#### Webhook Event Signature
+When a secret is configured on a webhook, OpenSMS computes an HMAC-SHA256 signature across the raw JSON body and attaches it in the `X-OpenSMS-Signature` header:
+```http
+X-OpenSMS-Signature: sha256=<hex_digest>
+X-OpenSMS-Event: sms.delivered
+```
+Verify the payload by computing `hashlib.sha256(hmac)` with your configured secret.
 
 ---
 
@@ -327,7 +391,7 @@ OpenSMS automatically detects character encoding and divides long messages using
 |---|---|
 | `sms:write` | `POST /sms/`, `POST /sms/batch/` |
 | `sms:read` | `GET /sms/{id}`, `GET /sms/history`, `GET /system/*`, docs endpoints |
-| `admin` | everything above plus `GET/POST /keys/`, `DELETE /keys/{id}`, `POST /control/` |
+| `admin` | everything above plus `GET/POST /keys/`, `DELETE /keys/{id}`, `GET/POST/DELETE /webhooks/`, `POST /control/` |
 
 A key lacking the scope receives `403`. Send requests over the per-key rate limit receive `429` with `Retry-After`.
 

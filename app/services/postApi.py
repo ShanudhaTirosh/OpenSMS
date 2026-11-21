@@ -7,6 +7,7 @@ from threading import Thread
 from os.path import dirname, abspath, join, exists
 import json
 import uuid
+import time
 
 from fastapi import FastAPI, Request, HTTPException, Depends, status, Query
 from fastapi.responses import JSONResponse
@@ -32,6 +33,8 @@ from services.authSvc import (
 )
 from services.dbMgr import DatabaseManager
 from services.updateMgr import UpdateManager
+from services.batterySvc import get_battery_info
+from services import webhookSvc
 
 ## global vars / obj
 app_name = "opensms"
@@ -180,6 +183,43 @@ class NewKeyData(BaseModel):
         bad = [x for x in v if x not in ALL_SCOPES]
         if bad or not v:
             raise ValueError(f"Scopes must be a non-empty subset of {sorted(ALL_SCOPES)}.")
+        return v
+
+class WebhookCreateData(BaseModel):
+    url: str
+    events: list[str] = ["sms.delivered", "sms.failed"]
+    secret: str | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("Webhook URL must start with http:// or https://")
+        if len(v) > 512:
+            raise ValueError("Webhook URL cannot exceed 512 characters.")
+        return v
+
+    @field_validator("events")
+    @classmethod
+    def _events(cls, v: list[str]) -> list[str]:
+        supported = set(DatabaseManager.SUPPORTED_WEBHOOK_EVENTS)
+        bad = [e for e in v if e not in supported]
+        if bad:
+            raise ValueError(f"Unsupported event(s): {bad}. Supported: {sorted(supported)}.")
+        if not v:
+            raise ValueError("Events list cannot be empty.")
+        return v
+
+    @field_validator("secret")
+    @classmethod
+    def _secret(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if len(v) > 128:
+                raise ValueError("Webhook secret cannot exceed 128 characters.")
+            if not v:
+                return None
         return v
 
 # FastAPI app
@@ -572,11 +612,31 @@ async def _send_batch(batch: BatchSmsData, request: Request, client: dict):
     _enforce_send_quota(client, total)
     batch_id = str(uuid.uuid4())
 
-    entries = []
+    # Batch insert to database in a single atomic transaction
+    batch_records = []
+    batch_meta = []
     for item in batch.messages:
-        msg_id = _prepare(db, item, batch_id=batch_id)
-        entries.append((item, msg_id, svc.enqueue(msg_id, item.number, item.text,
-                                                  item.sim_slot if item.sim_slot is not None else -1)))
+        sim_slot = item.sim_slot if item.sim_slot is not None else -1
+        seg_info = calculate_sms_segments(item.text)
+        msg_id = str(uuid.uuid4())
+        batch_records.append({
+            "msg_id": msg_id,
+            "recipient": item.number,
+            "text": item.text,
+            "encoding": seg_info["encoding"],
+            "segments": seg_info["segments"],
+            "sim_slot": sim_slot,
+            "status": "queued",
+            "batch_id": batch_id,
+            "provider": svc.provider.name,
+        })
+        batch_meta.append((item, msg_id, sim_slot))
+
+    db.create_messages_batch(batch_records)
+
+    entries = []
+    for item, msg_id, sim_slot in batch_meta:
+        entries.append((item, msg_id, svc.enqueue(msg_id, item.number, item.text, sim_slot)))
 
     wait = max(SUBMIT_WAIT_SECONDS, 0.25 * total + 5)
     async def _outcome(fut):
@@ -643,7 +703,8 @@ async def get_system_stats(client: dict = Depends(require_scope(SCOPE_READ))):
     return {
         "app": "OpenSMS",
         "version": __version__,
-        "metrics": _db().get_metrics()
+        "metrics": _db().get_metrics(),
+        "battery": get_battery_info()
     }
 
 @app.get("/system/sims/")
@@ -678,6 +739,47 @@ async def revoke_key(key_id: str, client: dict = Depends(require_scope(SCOPE_ADM
     db.revoke_api_key(key_id)
     log_activities(f"Revoked API key: {key_id}")
     return {"revoked": True, "id": key_id}
+
+# ---- Webhook subscription management (admin scope) -----------------------
+@app.get("/webhooks/")
+async def list_webhooks(client: dict = Depends(require_scope(SCOPE_ADMIN))):
+    hooks = _db().list_webhooks()
+    return {"count": len(hooks), "webhooks": hooks}
+
+@app.post("/webhooks/", status_code=201)
+async def create_webhook(body: WebhookCreateData, client: dict = Depends(require_scope(SCOPE_ADMIN))):
+    hook_id = _db().add_webhook(url=body.url, events=body.events, secret=body.secret)
+    log_activities(f"Registered webhook: {body.url} (id: {hook_id})")
+    return {"id": hook_id, "url": body.url, "events": body.events, "has_secret": bool(body.secret)}
+
+@app.delete("/webhooks/{webhook_id}")
+async def delete_webhook(webhook_id: str, client: dict = Depends(require_scope(SCOPE_ADMIN))):
+    db = _db()
+    if not db.get_webhook(webhook_id):
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    db.delete_webhook(webhook_id)
+    log_activities(f"Deleted webhook: {webhook_id}")
+    return {"deleted": True, "id": webhook_id}
+
+@app.post("/webhooks/test/{webhook_id}")
+async def test_webhook(webhook_id: str, client: dict = Depends(require_scope(SCOPE_ADMIN))):
+    db = _db()
+    hook = db.get_webhook(webhook_id, include_secret=True)
+    if not hook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    test_payload = {
+        "event": "webhook.test",
+        "timestamp": time.time(),
+        "data": {
+            "webhook_id": webhook_id,
+            "message": "OpenSMS webhook test ping",
+            "version": __version__
+        }
+    }
+    ok, code, err = webhookSvc.send_webhook_request(
+        hook["url"], test_payload, secret=hook.get("secret"), timeout=5.0
+    )
+    return {"success": ok, "status_code": code, "error": err}
 
 # ---- machine-readable docs (authenticated unless OPENSMS_PUBLIC_DOCS=1) ----
 async def _docs_access(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(security)):

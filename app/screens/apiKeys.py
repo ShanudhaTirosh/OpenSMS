@@ -1,4 +1,5 @@
 """API keys screen: list, create (shown once), revoke with confirmation."""
+import time
 from threading import Thread
 
 from kivymd.app import MDApp
@@ -105,14 +106,37 @@ Builder.load_string('''
             theme_text_color: "Secondary"
             adaptive_height: True
 
-        MDButton:
-            style: "filled"
-            height: dp(48)
-            on_release: root.show_create_dialog()
-            MDButtonIcon:
-                icon: "key-plus"
-            MDButtonText:
-                text: "New key"
+        MDBoxLayout:
+            orientation: "horizontal"
+            adaptive_height: True
+            spacing: dp(8)
+
+            MDButton:
+                style: "filled"
+                height: dp(48)
+                on_release: root.show_create_dialog()
+                MDButtonIcon:
+                    icon: "key-plus"
+                MDButtonText:
+                    text: "New key"
+
+            MDButton:
+                style: "tonal"
+                height: dp(48)
+                on_release: root.show_webhooks_dialog()
+                MDButtonIcon:
+                    icon: "webhook"
+                MDButtonText:
+                    text: "Webhooks"
+
+            MDButton:
+                style: "tonal"
+                height: dp(48)
+                on_release: root.show_quick_connect_dialog()
+                MDButtonIcon:
+                    icon: "link-variant"
+                MDButtonText:
+                    text: "Connect"
 
     MDScrollView:
         do_scroll_x: False
@@ -329,3 +353,154 @@ class ApiKeysBox(MDBoxLayout):
         app.show_text_dialog(f"Revoke '{name}'?",
                              "Every client using this key will stop working immediately. This cannot be undone.",
                              None, buttons)
+
+    def show_quick_connect_dialog(self):
+        self._app().show_quick_connect_dialog()
+
+    # ------------------------------------------------------------ webhooks
+    def show_webhooks_dialog(self):
+        app = self._app()
+        db = self._db()
+        hooks = db.list_webhooks()
+
+        content = MDDialogContentContainer(orientation="vertical", spacing=dp(8))
+        if not hooks:
+            content.add_widget(MDLabel(
+                text="No webhooks registered.\nAdd a webhook endpoint to receive real-time notifications on delivery reports and status changes.",
+                theme_text_color="Secondary",
+                font_style="Body",
+                role="medium",
+                adaptive_height=True
+            ))
+        else:
+            for h in hooks:
+                h_box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(4), padding=dp(8))
+                h_url = MDLabel(text=h.get("url", ""), font_style="Title", role="small", adaptive_height=True)
+                evs = ", ".join(h.get("events") or [])
+                h_sub = MDLabel(text=f"Events: {evs}", font_style="Body", role="small", theme_text_color="Secondary", adaptive_height=True)
+                btn_row = MDBoxLayout(orientation="horizontal", adaptive_height=True, spacing=dp(8))
+                test_b = MDButton(MDButtonText(text="Test"), style="text")
+                test_b.bind(on_release=lambda *_, hid=h["id"]: self._test_webhook(hid))
+                del_b = MDButton(MDButtonText(text="Delete", theme_text_color="Custom", text_color="red"), style="text")
+                del_b.bind(on_release=lambda *_, hid=h["id"], hurl=h.get("url", ""): self._confirm_delete_webhook(hid, hurl))
+                btn_row.add_widget(test_b)
+                btn_row.add_widget(del_b)
+                h_box.add_widget(h_url)
+                h_box.add_widget(h_sub)
+                h_box.add_widget(btn_row)
+                content.add_widget(h_box)
+
+        buttons = MDDialogButtonContainer(
+            Widget(),
+            MDButton(
+                MDButtonText(text="Add Webhook"),
+                style="text",
+                on_release=lambda *_: (app.txt_dialog_closer(), self.show_add_webhook_dialog())
+            ),
+            MDButton(
+                MDButtonText(text="Close"),
+                style="text",
+                on_release=app.txt_dialog_closer
+            ),
+            spacing="8dp",
+        )
+        app.show_text_dialog("Delivery Webhooks", "Notify your HTTP service on message delivery.", content, buttons)
+
+    def show_add_webhook_dialog(self):
+        app = self._app()
+        url_field = MDTextField(
+            MDTextFieldHintText(text="Webhook URL (https://...)"),
+            mode="outlined",
+            size_hint_y=None,
+            height=dp(56)
+        )
+        secret_field = MDTextField(
+            MDTextFieldHintText(text="Secret key (optional, for HMAC signature)"),
+            mode="outlined",
+            size_hint_y=None,
+            height=dp(56)
+        )
+        error_lbl = MDLabel(
+            text="",
+            theme_text_color="Custom",
+            text_color=(0.85, 0.25, 0.25, 1),
+            font_style="Label",
+            role="medium",
+            adaptive_height=True
+        )
+
+        content = MDDialogContentContainer(orientation="vertical", spacing=dp(8))
+        content.add_widget(url_field)
+        content.add_widget(secret_field)
+        content.add_widget(error_lbl)
+
+        def do_add(*_):
+            raw_url = url_field.text.strip()
+            if not (raw_url.startswith("http://") or raw_url.startswith("https://")):
+                error_lbl.text = "URL must start with http:// or https://"
+                return
+            try:
+                secret = secret_field.text.strip() or None
+                self._db().add_webhook(url=raw_url, events=["sms.sent", "sms.delivered", "sms.failed"], secret=secret)
+                app.txt_dialog_closer()
+                app.show_toast_msg("Webhook added successfully")
+                self.show_webhooks_dialog()
+            except Exception as e:
+                error_lbl.text = f"Failed to add webhook: {e}"
+
+        buttons = MDDialogButtonContainer(
+            Widget(),
+            MDButton(
+                MDButtonText(text="Cancel"),
+                style="text",
+                on_release=lambda *_: (app.txt_dialog_closer(), self.show_webhooks_dialog())
+            ),
+            MDButton(
+                MDButtonText(text="Save", theme_text_color="Custom", text_color="green"),
+                style="text",
+                on_release=do_add
+            ),
+            spacing="8dp",
+        )
+        app.show_text_dialog("Add Webhook", "Deliver SMS status updates via HTTP POST.", content, buttons)
+
+    def _test_webhook(self, webhook_id: str):
+        app = self._app()
+        def worker():
+            from services.webhookSvc import send_webhook_request
+            wh = self._db().get_webhook(webhook_id, include_secret=True)
+            if not wh:
+                Clock.schedule_once(lambda dt: app.show_toast_msg("Webhook not found", is_error=True), 0)
+                return
+            payload = {
+                "event": "test.ping",
+                "timestamp": int(time.time()),
+                "message": {"id": "test-id", "status": "delivered", "text": "Test ping from OpenSMS"}
+            }
+            ok, status_code, err = send_webhook_request(wh["url"], payload, wh.get("secret"))
+            if ok:
+                msg = f"Test webhook delivered successfully (HTTP {status_code})"
+                is_err = False
+            else:
+                msg = f"Test failed: HTTP {status_code or 'error'} ({err})"
+                is_err = True
+            Clock.schedule_once(lambda dt: app.show_toast_msg(msg, is_error=is_err), 0)
+
+        Thread(target=worker, daemon=True).start()
+
+    def _confirm_delete_webhook(self, webhook_id: str, url: str):
+        app = self._app()
+        def do_delete(*_):
+            app.txt_dialog_closer()
+            self._db().delete_webhook(webhook_id)
+            app.show_toast_msg("Webhook deleted")
+            self.show_webhooks_dialog()
+
+        buttons = MDDialogButtonContainer(
+            Widget(),
+            MDButton(MDButtonText(text="Cancel"), style="text", on_release=lambda *_: (app.txt_dialog_closer(), self.show_webhooks_dialog())),
+            MDButton(MDButtonText(text="Delete", theme_text_color="Custom", text_color="red"), style="text", on_release=do_delete),
+            spacing="8dp",
+        )
+        app.show_text_dialog("Delete Webhook?", f"Delete webhook destination:\n{url}", None, buttons)
+

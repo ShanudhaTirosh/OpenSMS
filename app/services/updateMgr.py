@@ -262,6 +262,33 @@ class UpdateManager:
             return {"success": False, "error": f"Update check error: {str(e)}"}
 
     @staticmethod
+    def cleanup_update_artifacts(dest_dir: str, keep_file: Optional[str] = None) -> int:
+        """
+        Removes temporary or obsolete downloaded APK files from the update directory.
+        Returns the number of files removed.
+        """
+        if not os.path.exists(dest_dir):
+            return 0
+        cleaned = 0
+        try:
+            keep_abs = os.path.abspath(keep_file) if keep_file else None
+            for fname in os.listdir(dest_dir):
+                fpath = os.path.join(dest_dir, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                if keep_abs and os.path.abspath(fpath) == keep_abs:
+                    continue
+                if fname.endswith(".apk") or fname.endswith(".tmp"):
+                    try:
+                        os.remove(fpath)
+                        cleaned += 1
+                    except OSError:
+                        pass
+        except Exception as e:
+            print(f"Notice: cleanup_update_artifacts error: {e}")
+        return cleaned
+
+    @staticmethod
     def download_apk(
         apk_url: str,
         dest_path: str,
@@ -280,7 +307,9 @@ class UpdateManager:
         expected = _clean_sha256(expected_sha256)
         digest = hashlib.sha256()
 
-        os.makedirs(os.path.dirname(os.path.abspath(dest_path)), exist_ok=True)
+        dest_dir = os.path.dirname(os.path.abspath(dest_path))
+        os.makedirs(dest_dir, exist_ok=True)
+        UpdateManager.cleanup_update_artifacts(dest_dir, keep_file=dest_path)
         tmp_path = dest_path + ".tmp"
 
         headers = {"User-Agent": "OpenSMS-Downloader"}

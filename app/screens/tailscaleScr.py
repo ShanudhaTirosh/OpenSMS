@@ -465,7 +465,17 @@ class TailscaleBox(MDBoxLayout):
         super().__init__(**kwargs)
         self.port = 9292
         self.cached_snippets = {}
-        Clock.schedule_interval(self._emb_poll, 2.0)
+        self._poll_trigger = None
+
+    def start_poll(self):
+        self.stop_poll()
+        self.emb_refresh()
+        self._poll_trigger = Clock.schedule_interval(self._emb_poll, 2.0)
+
+    def stop_poll(self):
+        if self._poll_trigger:
+            self._poll_trigger.cancel()
+            self._poll_trigger = None
 
     # ---- built-in Tailscale card
     def _emb_poll(self, dt):
@@ -473,7 +483,7 @@ class TailscaleBox(MDBoxLayout):
         from kivymd.app import MDApp
         app = MDApp.get_running_app()
         try:
-            if app and app.root.ids.screen_manager.current == "Mesh":
+            if app and hasattr(app, "root") and app.root and hasattr(app.root, "ids") and "screen_manager" in app.root.ids and app.root.ids.screen_manager.current == "Mesh":
                 before = self.emb_connected
                 self.emb_refresh()
                 if before != self.emb_connected:       # the status card below must follow the built-in node

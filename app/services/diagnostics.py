@@ -86,6 +86,10 @@ def build_sections(f: Dict[str, Any]) -> List[Dict[str, Any]]:
             sms.append(_row("SIM cards", "Could not be read", WARN, "Grant the Phone permission; until then only the default SIM can be used."))
     else:
         sms.append(_row("SMS provider", "Simulation (not Android): nothing is sent", INFO))
+    sim_breakdown = (f.get("metrics") or {}).get("sim_breakdown") or {}
+    if sim_breakdown:
+        sim_summary = ", ".join(f"{k}: {v}" for k, v in sim_breakdown.items())
+        sms.append(_row("SIM traffic today", sim_summary, OK))
     sections.append({"title": "SMS", "rows": sms})
 
     # ---------------- network ----------------

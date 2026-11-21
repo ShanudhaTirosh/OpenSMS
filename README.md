@@ -11,6 +11,8 @@ Developed & maintained by **[Shanudha Tirosh](https://info.shanutechx.com)**.
 ### ✨ Key Features
 
 - 📱 **Turns your Android device into an SMS REST API gateway**.
+- 🔔 **Event Webhooks & Live Delivery Callbacks**: Real-time asynchronous HTTP callbacks (`sms.submitted`, `sms.sent`, `sms.delivered`, `sms.failed`) with HMAC-SHA256 request signature verification (`X-OpenSMS-Signature`).
+- 🔋 **Live Battery & Power Telemetry**: Real-time reporting of device battery level, charging status, and power source (AC, USB, wireless) exposed directly via `/system/stats/`.
 - 🚀 **1-Tap In-App Auto-Updater**: Automatic update checks directly against GitHub Releases, animated banner alerts, download progress reporting, and native Android APK package installation (`REQUEST_INSTALL_PACKAGES`).
 - 📊 **Live Metrics & SQLite Message Persistence**: High-performance SQLite engine operating in Write-Ahead Logging (`WAL`) mode. Tracks queued, sent, and failed messages with live home dashlet metrics (Sent Today, Success Rate %, and Queue Depth).
 - 📶 **Dual-SIM & Multi-SIM Telephony Orchestration**: Auto-detects dual SIM configurations via Android `SubscriptionManager`. Choose preferred carrier slot in Settings or dynamically route per API request using `sim_slot`.
@@ -86,6 +88,18 @@ curl -i -X POST 'http://<DEVICE_IP>:9292/sms/batch/' \
 ```bash
 curl http://<DEVICE_IP>:9292/health/
 curl -H 'Authorization: Bearer your-secret-api-key' http://<DEVICE_IP>:9292/system/stats/
+```
+
+#### Event Webhooks (Configure Callbacks)
+```bash
+curl -i -X POST 'http://<DEVICE_IP>:9292/webhooks/' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer your-admin-api-key' \
+  -d '{
+    "url": "https://your-server.com/sms-webhook",
+    "events": ["sms.sent", "sms.delivered", "sms.failed"],
+    "secret": "my-secure-webhook-secret-min16"
+  }'
 ```
 
 #### Query Message Delivery Status

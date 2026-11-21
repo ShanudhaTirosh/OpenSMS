@@ -190,9 +190,12 @@ def gather_facts(app) -> dict:
     except Exception:
         facts["ts_log"] = ""
     try:
-        facts["db"] = DatabaseManager.get_instance(app.config_dir).storage_stats()
+        db = DatabaseManager.get_instance(app.config_dir)
+        facts["db"] = db.storage_stats()
+        facts["metrics"] = db.get_metrics()
     except Exception:
         facts["db"] = {}
+        facts["metrics"] = {}
     return facts
 
 
@@ -259,6 +262,7 @@ class SystemBox(MDBoxLayout):
                            radius=[dp_(14)], theme_bg_color="Custom", md_bg_color=card_color(theme))
         card.add_widget(_title("Maintenance"))
         for text, icon, handler in (
+                ("Export message history (CSV)", "file-download-outline", lambda *_: self.export_csv()),
                 ("Clear messages older than 30 days", "delete-clock-outline", lambda *_: self._confirm_clear(30)),
                 ("Clear all finished messages", "delete-sweep-outline", lambda *_: self._confirm_clear(None)),
                 ("Battery settings", "battery-heart-variant", lambda *_: self._app().open_battery_settings())):
@@ -266,6 +270,18 @@ class SystemBox(MDBoxLayout):
             b.bind(on_release=handler)
             card.add_widget(b)
         return card
+
+    def export_csv(self):
+        app = self._app()
+        try:
+            csv_data = DatabaseManager.get_instance(app.config_dir).export_messages_csv(limit=1000)
+            dest = os.path.join(app.config_dir, "opensms_export.csv")
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write(csv_data)
+            Clipboard.copy(csv_data)
+            app.show_toast_msg("Exported messages to opensms_export.csv & clipboard")
+        except Exception as e:
+            app.show_toast_msg(f"Export error: {e}", is_error=True)
 
     def _confirm_clear(self, days):
         app = self._app()

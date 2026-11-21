@@ -2,6 +2,42 @@
 
 ## Changes
 
+### 0.5.5 (2026-11-21)
+
+#### UI/UX & Visual Ergonomics
+- **Hero Card Above-the-Fold Placement**: Repositioned the primary Server toggle button ("Start Server" / "Stop Server") inside the Gateway Hero Status Card, eliminating scrolling past network addresses and metrics on compact mobile screens.
+- **WCAG AA Dynamic Color Contrast**: Upgraded `STATUS_STYLE` color tuples to darker, high-contrast values achieving $\ge 4.5:1$ contrast against light card backgrounds.
+- **M3 Streamlined Compose Flow**: Consolidated the previous two-step confirmation dialog into a unified single dialog featuring real-time segment and character metrics, SIM slot indicator, and direct Send submission.
+- **Touch Target & Accessibility Upgrades**: Standardized all icon buttons, filter chips, and interactive cards to adhere to the Material 3 48dp minimum touch target standard.
+- **Navigation State Synchronization**: Synchronized bottom navigation bar active states when navigating to secondary screens (`System`, `Logs`) to highlight the parent Settings tab.
+
+#### Feature Expansions
+- **In-App Webhooks Management UI**: Added a full in-app Webhooks management dialog enabling users to list active webhook destinations, add new endpoints with HMAC secrets, test delivery pings, and delete active webhooks directly on device.
+- **Client Pairing & Quick Connect**: Added a "Connect" action dialog providing base Gateway URLs, Bearer authentication syntax, and one-tap copyable cURL commands for instant client integration.
+- **Per-SIM Quota & Usage Analytics**: Added per-SIM message traffic breakdown in `get_metrics()`, surfacing daily volume per SIM slot in the diagnostics report.
+- **Message History CSV Export**: Implemented CSV export pipeline that writes `opensms_export.csv` to app storage and copies data to the clipboard from both Messages and System screens.
+
+#### Performance & Perceived Loading
+- **In-Place Message List Diffing**: Refactored `MessagesBox._apply()` to perform non-destructive in-place diffing on quiet background auto-refreshes, preserving user scroll positions and eliminating list rebuild flicker.
+- **Reverse Byte-Seeking Log Viewer**: Optimized `LogService.get_recent_logs()` using reverse byte-seeking from the end of the file (reading only trailing ~64KB), eliminating reading entire multi-megabyte log files into memory.
+- **Lifecycle-Bound Polling**: Bound background Tailscale status polling strictly to screen entry (`on_enter`) and exit (`on_leave`), stopping unnecessary background wakeups when viewing other screens.
+- **Network Discovery Throttle**: Relaxed periodic network interface discovery polling interval from 5.0s to 10.0s to conserve battery life.
+
+#### Stability, Architecture & Android 15
+- **Atomic Batch SQLite Ingestion**: Implemented `DatabaseManager.create_messages_batch()` using atomic `executemany` in a single transaction, preventing SQLite database lock contention during concurrent batch dispatches.
+- **Thread-Safe UI Marshaling**: Safely marshaled all dialog, toast, and snackbar invocations through `Clock.schedule_once` when invoked from background worker threads, eliminating GLES/SDL rendering crashes.
+- **Auto-Update Storage Sanitation**: Added automatic cleanup of stale `.apk` and `.tmp` files in the download directory before downloading new updates.
+- **Target SDK 35 (Android 15)**: Aligned target Android API to production-standard API 35 with `#0F172A` presplash styling in `buildozer.spec`.
+- **Monotonic Version Code (505)**: Incremented `android.numeric_version` to `505` in `app/buildozer.spec`.
+
+#### Event Webhooks & Delivery Callbacks
+- **Asynchronous Webhook Subsystem (`webhookSvc`)**: Real-time non-blocking HTTP POST delivery callbacks (`sms.submitted`, `sms.sent`, `sms.delivered`, `sms.failed`) with 5s timeout and thread-pool execution.
+- **HMAC-SHA256 Cryptographic Signatures**: Computes `X-OpenSMS-Signature` header over raw JSON payload using the configured webhook secret for tampering prevention.
+- **REST Endpoints**: Added `GET /webhooks/`, `POST /webhooks/`, `DELETE /webhooks/{webhook_id}`, and `POST /webhooks/test/{webhook_id}` requiring `admin` scope.
+
+#### Telemetry & Device Battery State
+- **Battery Telemetry (`batterySvc`)**: Cross-platform Android battery monitoring (`ACTION_BATTERY_CHANGED`) reporting level percentage, charging state (`is_charging`), and power source (`ac`, `usb`, `wireless`, `unplugged`) in `GET /system/stats/`.
+
 ### 0.5.4 (2026-11-05)
 
 #### Package Installation & In-App Updater

@@ -30,6 +30,8 @@ Authorization Header: `Authorization: Bearer <API_KEY>`
 | `/sms/history` | GET | List messages (`limit`, `offset`, `status`, `search`; returns `total`, `has_more`) | Yes |
 | `/keys/` | GET, POST | List / create API keys | Yes (`admin`) |
 | `/keys/{id}` | DELETE | Revoke an API key | Yes (`admin`) |
+| `/webhooks/` | GET, POST | List / register event webhooks | Yes (`admin`) |
+| `/webhooks/{id}` | DELETE | Delete registered webhook | Yes (`admin`) |
 | `/system/stats/` | GET | Sent today, success rate, queue | Yes |
 | `/system/sims/` | GET | Active SIM slots & carriers | Yes |
 | `/system/update/`| GET | Check for GitHub updates | Yes |

@@ -105,10 +105,8 @@ class LogBox(MDBoxLayout):
 
     def log_show(self, instance=None, top_back_btn=None):
         container = self.ids.log_container
-        raw_logs = self.logger.get_api_logs()
-
-        # Bounded memory rendering: keep only the latest 200 entries to prevent OpenGL texture crash
-        recent_logs = raw_logs[-200:]
+        # Fast bounded read: query only the recent lines directly
+        recent_logs = self.logger.get_recent_logs(200)
 
         filtered_lines = []
         for line in reversed(recent_logs):

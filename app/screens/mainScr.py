@@ -111,6 +111,14 @@ Builder.load_string('''
                             theme_text_color: "Secondary"
                             adaptive_height: True
 
+                # Primary Action Button (Start / Stop) positioned prominently in Hero Card
+                ButtonControl:
+                    id: api_srv_btn
+                    style: "filled"
+                    size_hint_x: 1
+                    pos_hint: {"center_x": .5}
+                    on_release: app.api_server_mgr(self)
+
                 MDDivider:
                     size_hint_x: 1
 
@@ -192,6 +200,14 @@ Builder.load_string('''
                             icon: "code-tags"
                         MDButtonText:
                             text: "Copy cURL"
+
+                    MDButton:
+                        style: "outlined"
+                        on_release: app.show_quick_connect_dialog()
+                        MDButtonIcon:
+                            icon: "link-variant"
+                        MDButtonText:
+                            text: "Connect"
 
             # Live Metrics Dashlet Row
             MDBoxLayout:
@@ -276,14 +292,6 @@ Builder.load_string('''
                         theme_text_color: "Custom"
                         text_color: [0.85, 0.55, 0.1, 1] if app.theme_style == "Light" else [1, 0.75, 0.3, 1]
                         adaptive_height: True
-
-            # Primary Action Button (Start / Stop)
-            ButtonControl:
-                id: api_srv_btn
-                style: "filled"
-                size_hint_x: 0.95
-                pos_hint: {"center_x": .5}
-                on_release: app.api_server_mgr(self)
 
             # Quick Operations & Tools Card
             MDBoxLayout:

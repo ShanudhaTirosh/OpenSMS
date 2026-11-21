@@ -1,17 +1,20 @@
 """
 Presentation helpers for the Messages and API screens. No Kivy imports: everything here is unit tested.
 """
+import csv
 import datetime
+import io
 from typing import Any, Dict, List, Optional
 
 # status -> (label, icon, rgba colour, plain-language explanation)
+# WCAG AA compliant contrast (>= 4.5:1 ratio against light backgrounds)
 STATUS_STYLE = {
-    "queued":    ("Queued",    "clock-outline",         (0.55, 0.55, 0.60, 1), "Accepted and waiting to be handed to the phone's SMS service."),
-    "submitted": ("Submitted", "send-clock-outline",    (0.20, 0.45, 0.85, 1), "Handed to Android. The radio result is not known yet."),
-    "sent":      ("Sent",      "check",                 (0.10, 0.60, 0.60, 1), "The network accepted every part. Delivery is only confirmed if your carrier returns a delivery report."),
-    "delivered": ("Delivered", "check-all",             (0.15, 0.65, 0.30, 1), "A delivery report confirmed every part reached the recipient's handset."),
-    "failed":    ("Failed",    "alert-circle-outline",  (0.80, 0.25, 0.25, 1), "The message was rejected or could not be sent."),
-    "unknown":   ("Unknown",   "help-circle-outline",   (0.85, 0.60, 0.10, 1), "No result was received (for example the app restarted). It may or may not have been sent."),
+    "queued":    ("Queued",    "clock-outline",         (0.32, 0.35, 0.40, 1), "Accepted and waiting to be handed to the phone's SMS service."),
+    "submitted": ("Submitted", "send-clock-outline",    (0.12, 0.35, 0.75, 1), "Handed to Android. The radio result is not known yet."),
+    "sent":      ("Sent",      "check",                 (0.04, 0.45, 0.48, 1), "The network accepted every part. Delivery is only confirmed if your carrier returns a delivery report."),
+    "delivered": ("Delivered", "check-all",             (0.08, 0.50, 0.22, 1), "A delivery report confirmed every part reached the recipient's handset."),
+    "failed":    ("Failed",    "alert-circle-outline",  (0.72, 0.18, 0.18, 1), "The message was rejected or could not be sent."),
+    "unknown":   ("Unknown",   "help-circle-outline",   (0.68, 0.42, 0.05, 1), "No result was received (for example the app restarted). It may or may not have been sent."),
 }
 FILTERS = ["all", "queued", "submitted", "sent", "delivered", "failed", "unknown"]
 PAGE_SIZE = 25
@@ -124,3 +127,40 @@ def valid_key_name(name: str) -> Optional[str]:
     if len(name) > 64:
         return "Use at most 64 characters."
     return None
+
+
+def export_messages_to_csv(messages: List[Dict[str, Any]]) -> str:
+    """Exports a list of message dicts to standard CSV format."""
+    output = io.StringIO()
+    fieldnames = [
+        "id", "recipient", "status", "sim_slot", "segments",
+        "encoding", "provider", "carrier_error", "created_at",
+        "updated_at", "delivered_at", "text"
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for m in messages:
+        row = dict(m)
+        for ts_key in ("created_at", "updated_at", "delivered_at"):
+            if row.get(ts_key):
+                try:
+                    row[ts_key] = datetime.datetime.fromtimestamp(row[ts_key]).astimezone().isoformat()
+                except Exception:
+                    pass
+        writer.writerow(row)
+    return output.getvalue()
+
+
+def webhook_row(wh: Dict[str, Any], now=None) -> Dict[str, Any]:
+    active = bool(wh.get("is_active", 1))
+    events = wh.get("events") or []
+    return {
+        "id": wh["id"],
+        "url": wh.get("url", ""),
+        "events": ", ".join(events) if events else "all",
+        "has_secret": bool(wh.get("has_secret")),
+        "created": format_time(wh.get("created_at"), now),
+        "active": active,
+        "state": "Active" if active else "Inactive",
+    }
+

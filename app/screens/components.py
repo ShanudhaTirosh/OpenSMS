@@ -11,8 +11,8 @@ Builder.load_string('''
 <StatusChip>:
     orientation: "horizontal"
     adaptive_size: True
-    padding: dp(8), dp(4)
-    spacing: dp(4)
+    padding: dp(10), dp(6)
+    spacing: dp(6)
     radius: [dp(12)]
     theme_bg_color: "Custom"
     md_bg_color: [root.chip_color[0], root.chip_color[1], root.chip_color[2], 0.18]
@@ -22,9 +22,9 @@ Builder.load_string('''
         icon: root.icon
         theme_icon_color: "Custom"
         icon_color: root.chip_color
-        font_size: dp(16)
+        font_size: dp(18)
         size_hint: None, None
-        size: dp(16), dp(16)
+        size: dp(18), dp(18)
         pos_hint: {"center_y": 0.5}
 
     MDLabel:

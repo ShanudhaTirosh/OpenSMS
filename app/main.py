@@ -6,6 +6,7 @@ import sys
 import time
 import json
 import socket
+import threading
 from threading import Thread
 
 from kivy.uix.widget import Widget
@@ -254,7 +255,7 @@ class OpenSmsApp(MDApp):
         self.update_home_metrics()
 
         # Periodically refresh network status & Tailscale state
-        Clock.schedule_interval(lambda dt: self.update_network_addresses(), 5.0)
+        Clock.schedule_interval(lambda dt: self.update_network_addresses(), 10.0)
 
         # Check for updates automatically in background if enabled
         if self.config_template.get("auto_update", True):
@@ -705,15 +706,27 @@ class OpenSmsApp(MDApp):
         self.api_key = None
 
     ## Copy helpers for home screen
-    def copy_endpoint_url(self, instance=None):
+    def _get_active_endpoint(self) -> tuple[str, str]:
         port = self.req_template.get("port", 9292)
-        endpoint, _ = TailscaleService.get_preferred_endpoint(port, self.config_template.get('bind_mode', BIND_ALL))
+        mode = self.config_template.get('bind_mode', BIND_ALL)
+        ts_status = TailscaleService.get_status()
+        emb_status = self.ts_embedded_status()
+        emb_connected = emb_status.get("state") == "connected"
+        emb_ip = emb_status.get("ip") or (emb_status.get("addresses") or [None])[0]
+
+        preferred_endpoint, net_type = TailscaleService.get_preferred_endpoint(port, mode)
+        if emb_connected and emb_ip and not ts_status.get("connected"):
+            net_type = "Tailscale (embedded)"
+            preferred_endpoint = f"http://{emb_ip}:{port}/sms/"
+        return preferred_endpoint, net_type
+
+    def copy_endpoint_url(self, instance=None):
+        endpoint, _ = self._get_active_endpoint()
         Clipboard.copy(endpoint)
         self.show_toast_msg(f"Copied endpoint: {endpoint}")
 
     def copy_curl_example(self, instance=None):
-        port = self.req_template.get("port", 9292)
-        endpoint, _ = TailscaleService.get_preferred_endpoint(port, self.config_template.get('bind_mode', BIND_ALL))
+        endpoint, _ = self._get_active_endpoint()
         curl_cmd = (
             f"curl -i -X POST '{endpoint}' \\\n"
             f"  -H 'Content-Type: application/json' \\\n"
@@ -901,18 +914,24 @@ class OpenSmsApp(MDApp):
 
     ## UI helpers & dialogs
     def show_toast_msg(self, message, is_error=False, duration=3):
-        try:
-            from kivymd.uix.snackbar import MDSnackbar, MDSnackbarText
-            bg_color = (0.15, 0.55, 0.25, 1) if not is_error else (0.8, 0.2, 0.2, 1)
-            MDSnackbar(
-                MDSnackbarText(text=message),
-                y=dp(24),
-                orientation="horizontal",
-                pos_hint={"center_x": 0.5},
-                background_color=bg_color,
-            ).open()
-        except Exception as e:
-            print(f"Toast [{message}]: {e}")
+        def _do_toast(dt=None):
+            try:
+                from kivymd.uix.snackbar import MDSnackbar, MDSnackbarText
+                bg_color = (0.15, 0.55, 0.25, 1) if not is_error else (0.8, 0.2, 0.2, 1)
+                MDSnackbar(
+                    MDSnackbarText(text=message),
+                    y=dp(24),
+                    orientation="horizontal",
+                    pos_hint={"center_x": 0.5},
+                    background_color=bg_color,
+                ).open()
+            except Exception as e:
+                print(f"Toast [{message}]: {e}")
+
+        if threading.current_thread() is threading.main_thread():
+            _do_toast()
+        else:
+            Clock.schedule_once(_do_toast, 0)
 
     def show_text_dialog(
             self,
@@ -921,41 +940,57 @@ class OpenSmsApp(MDApp):
             custom_content: MDDialogContentContainer | None = None,
             buttons: MDDialogButtonContainer | None = None
         ):
-        if self.txt_dialog:
-            self.txt_dialog_closer()
+        def _do_dialog(dt=None):
+            if self.txt_dialog:
+                self.txt_dialog_closer()
 
-        # BUG-06 fix: Only pass non-None widgets to MDDialog
-        widgets = [
-            MDDialogHeadlineText(text=title),
-            MDDialogSupportingText(text=text)
-        ]
-        if custom_content:
-            widgets.append(custom_content)
-        if buttons:
-            widgets.append(buttons)
+            # BUG-06 fix: Only pass non-None widgets to MDDialog
+            widgets = [
+                MDDialogHeadlineText(text=title),
+                MDDialogSupportingText(text=text)
+            ]
+            if custom_content:
+                widgets.append(custom_content)
+            if buttons:
+                widgets.append(buttons)
 
-        self.txt_dialog = MDDialog(*widgets)
-        self.txt_dialog.open()
+            self.txt_dialog = MDDialog(*widgets)
+            self.txt_dialog.open()
+
+        if threading.current_thread() is threading.main_thread():
+            _do_dialog()
+        else:
+            Clock.schedule_once(_do_dialog, 0)
 
     def txt_dialog_closer(self, instance=None):
-        if self.txt_dialog:
-            self.txt_dialog.dismiss()
-            self.txt_dialog = None
+        def _do_close(dt=None):
+            if self.txt_dialog:
+                try:
+                    self.txt_dialog.dismiss()
+                except Exception:
+                    pass
+                self.txt_dialog = None
+
+        if threading.current_thread() is threading.main_thread():
+            _do_close()
+        else:
+            Clock.schedule_once(_do_close, 0)
 
     ## Test SMS Dialog
     def show_test_sms_dialog(self, instance=None):
         from kivymd.uix.label import MDLabel
+        from kivymd.uix.textfield import MDTextFieldHintText
         phone_input = MDTextField(
+            MDTextFieldHintText(text="Phone Number (e.g. +94755953683)"),
             mode="outlined",
-            hint_text="Phone Number (e.g. +94755953683)",
             input_type="tel",
             text="",
             size_hint_y=None,
             height=dp(56)
         )
         msg_input = MDTextField(
+            MDTextFieldHintText(text="Message text"),
             mode="outlined",
-            hint_text="Message text",
             input_type="text",
             multiline=True,
             text="Hello from OpenSMS test!",
@@ -988,20 +1023,36 @@ class OpenSmsApp(MDApp):
         )
         content_container = MDDialogContentContainer(content_box)
 
+        sent = {"done": False}
+        send_btn = MDButton(
+            MDButtonText(text="Send SMS", theme_text_color="Custom", text_color="green"),
+            style="text"
+        )
+
         def do_send(inst):
+            if sent["done"]:
+                return
+            sent["done"] = True
+            send_btn.disabled = True
             # The test message goes through the gateway queue like any other, so it shows up in Messages
             # with its real status (it no longer bypasses the message table).
             from services.outbox import write_outbox
             if not self.require_gateway_service():
+                sent["done"] = False
+                send_btn.disabled = False
                 return
             try:
                 write_outbox(self.config_dir, phone_input.text, msg_input.text,
                              self.config_template.get("sim_slot", -1))
             except (ValueError, OSError) as e:
+                sent["done"] = False
+                send_btn.disabled = False
                 self.show_toast_msg(f"Cannot send: {e}", is_error=True)
                 return
             self.txt_dialog_closer()
             self.show_toast_msg("Test SMS queued. Open Messages to follow its status.")
+
+        send_btn.bind(on_release=do_send)
 
         buttons = MDDialogButtonContainer(
             Widget(),
@@ -1010,11 +1061,7 @@ class OpenSmsApp(MDApp):
                 style="text",
                 on_release=self.txt_dialog_closer
             ),
-            MDButton(
-                MDButtonText(text="Send SMS", theme_text_color="Custom", text_color="green"),
-                style="text",
-                on_release=do_send
-            ),
+            send_btn,
             spacing="8dp",
         )
         self.show_text_dialog(
@@ -1292,6 +1339,18 @@ class OpenSmsApp(MDApp):
         self.close_nav_drawer()
         self.go_to_screen("Mesh")
 
+    def goto_logs_screen(self, instance=None):
+        self.close_nav_drawer()
+        self.go_to_screen("Logs")
+
+    def open_test_sms_from_drawer(self, instance=None):
+        self.close_nav_drawer()
+        self.show_test_sms_dialog()
+
+    def open_about_from_drawer(self, instance=None):
+        self.close_nav_drawer()
+        self.show_about_dialog()
+
     def open_or_install_tailscale(self, instance=None):
         """Open Tailscale app if installed, or open Google Play Store / download page."""
         if platform == "android":
@@ -1338,14 +1397,58 @@ class OpenSmsApp(MDApp):
             webbrowser.open("https://tailscale.com/download")
             self.show_toast_msg("Opening Tailscale download page...")
 
+    def show_quick_connect_dialog(self, instance=None):
+        endpoint, net_type = self._get_active_endpoint()
+        base_url = endpoint.rstrip("/sms/")
+        curl_cmd = (
+            f"curl -X POST '{endpoint}' \\\n"
+            f"  -H 'Content-Type: application/json' \\\n"
+            f"  -H 'Authorization: Bearer YOUR_API_KEY' \\\n"
+            f"  -d '{{\"number\": \"+1234567890\", \"text\": \"Hello!\"}}'"
+        )
+        content_text = (
+            f"Gateway Base URL:\n{base_url}\n\n"
+            f"Network: {net_type}\n\n"
+            "Authentication:\n"
+            "Include your API key as a Bearer token in the Authorization header:\n"
+            "Authorization: Bearer <key>\n\n"
+            f"Sample cURL:\n{curl_cmd}"
+        )
+        buttons = MDDialogButtonContainer(
+            Widget(),
+            MDButton(
+                MDButtonText(text="Copy URL"),
+                style="text",
+                on_release=lambda *_: (Clipboard.copy(base_url), self.show_toast_msg("Base URL copied"))
+            ),
+            MDButton(
+                MDButtonText(text="Copy cURL"),
+                style="text",
+                on_release=lambda *_: (Clipboard.copy(curl_cmd), self.show_toast_msg("cURL command copied"))
+            ),
+            MDButton(
+                MDButtonText(text="Close"),
+                style="text",
+                on_release=self.txt_dialog_closer
+            ),
+            spacing="8dp",
+        )
+        self.show_text_dialog(
+            "Quick Connect",
+            content_text,
+            None,
+            buttons
+        )
+
     def go_to_screen(self, screen: str):
         self.close_nav_drawer()
         self.root.ids.screen_manager.current = screen
+        target_tab = "Settings" if screen in ("System", "Logs") else screen
         try:
             bar = self.root.ids.btm_nav_bar
             for child in bar.children:
                 if hasattr(child, "text"):
-                    child.active = (child.text == screen)
+                    child.active = (child.text == target_tab)
         except Exception:
             pass
 
@@ -1373,7 +1476,9 @@ class OpenSmsApp(MDApp):
         self._plain_screen_entry("OpenSMS • Messages")
 
     def on_system_entry(self, instance=None):
-        self._plain_screen_entry("OpenSMS • System")
+        self.screen_title = "OpenSMS • System"
+        self.root.ids.top_back_btn.opacity = 1
+        self.root.ids.top_back_btn.disabled = False
 
     def on_api_entry(self, instance=None):
         self._plain_screen_entry("OpenSMS • API Keys")
@@ -1393,7 +1498,7 @@ class OpenSmsApp(MDApp):
             self.root.ids.log_scr.log_show(right_dot_menu, top_back_btn)
 
     def back_button_action(self, instance=None):
-        if self.root.ids.screen_manager.current in ["Settings", "Logs", "Mesh"]:
+        if self.root.ids.screen_manager.current in ["Settings", "Logs", "Mesh", "System", "API", "Messages"]:
             self.go_to_screen("SMS")
 
     def events(self, instance, keyboard, keycode, text, modifiers):
@@ -1402,7 +1507,7 @@ class OpenSmsApp(MDApp):
             if self.txt_dialog:
                 self.txt_dialog_closer()
                 return True
-            if self.root.ids.screen_manager.current in ["Settings", "Logs", "Mesh"]:
+            if self.root.ids.screen_manager.current in ["Settings", "Logs", "Mesh", "System", "API", "Messages"]:
                 self.back_button_action()
                 return True
         return False

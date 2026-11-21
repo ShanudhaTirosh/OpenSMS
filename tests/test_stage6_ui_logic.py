@@ -92,3 +92,39 @@ def test_key_rows_and_scope_text(db):
 def test_key_name_validation():
     assert U.valid_key_name("") and U.valid_key_name("   ") and U.valid_key_name("x" * 65)
     assert U.valid_key_name("CI server") is None
+
+def test_export_messages_to_csv_and_db_export(db):
+    for i in range(5):
+        db.create_message(f"+123456789{i}", f"Hello export message {i}", sim_slot=i % 2, status="sent" if i % 2 == 0 else "delivered")
+    csv_str = db.export_messages_csv(limit=10)
+    assert "recipient" in csv_str and "status" in csv_str and "text" in csv_str
+    assert "+1234567890" in csv_str
+    assert "Hello export message 0" in csv_str
+
+def test_webhook_row_formatting():
+    wh = {
+        "id": "wh-12345",
+        "url": "https://example.com/webhook",
+        "events": ["sms.sent", "sms.delivered"],
+        "has_secret": True,
+        "created_at": time.time(),
+        "is_active": 1
+    }
+    row = U.webhook_row(wh)
+    assert row["id"] == "wh-12345"
+    assert row["url"] == "https://example.com/webhook"
+    assert "sms.sent" in row["events"]
+    assert row["has_secret"] is True
+    assert row["state"] == "Active"
+
+def test_metrics_sim_breakdown(db):
+    db.create_message("+1111111111", "msg1", sim_slot=-1, status="sent")
+    db.create_message("+2222222222", "msg2", sim_slot=0, status="delivered")
+    db.create_message("+3333333333", "msg3", sim_slot=1, status="sent")
+    metrics = db.get_metrics()
+    assert "sim_breakdown" in metrics
+    breakdown = metrics["sim_breakdown"]
+    assert breakdown.get("Auto/Default") == 1
+    assert breakdown.get("SIM 1") == 1
+    assert breakdown.get("SIM 2") == 1
+

@@ -144,6 +144,41 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "WebhookCreateData": {
+        "properties": {
+          "events": {
+            "default": [
+              "sms.delivered",
+              "sms.failed"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "WebhookCreateData",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -165,7 +200,7 @@
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
     "title": "OpenSMS REST API",
-    "version": "0.5.4"
+    "version": "0.5.5"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -779,6 +814,154 @@
           }
         ],
         "summary": "Check for app updates"
+      }
+    },
+    "/webhooks/": {
+      "get": {
+        "description": "Needs scope `admin`. Returns active webhook endpoints and their subscribed events.",
+        "operationId": "list_webhooks_webhooks__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List registered webhooks"
+      },
+      "post": {
+        "description": "Needs scope `admin`. Subscribes an HTTP/HTTPS endpoint to delivery events (sms.submitted, sms.sent, sms.delivered, sms.failed) with optional HMAC secret.",
+        "operationId": "create_webhook_webhooks__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCreateData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Register a webhook"
+      }
+    },
+    "/webhooks/test/{webhook_id}": {
+      "post": {
+        "description": "Needs scope `admin`. Sends a test ping event (`webhook.test`) to verify endpoint connectivity.",
+        "operationId": "test_webhook_webhooks_test__webhook_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhook_id",
+            "required": true,
+            "schema": {
+              "title": "Webhook Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Test webhook delivery"
+      }
+    },
+    "/webhooks/{webhook_id}": {
+      "delete": {
+        "description": "Needs scope `admin`. Removes a registered webhook endpoint.",
+        "operationId": "delete_webhook_webhooks__webhook_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhook_id",
+            "required": true,
+            "schema": {
+              "title": "Webhook Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete a webhook"
       }
     }
   },

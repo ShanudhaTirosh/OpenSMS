@@ -82,7 +82,7 @@ requirements = python3,
 # requirements.source.kivy = ../../kivy
 
 # (str) Presplash of the application
-#presplash.filename = %(source.dir)s/data/presplash.png
+presplash.filename = %(source.dir)s/data/images/favicont512.png
 
 # (str) Icon of the application
 icon.filename = %(source.dir)s/data/images/favicont512.png
@@ -122,7 +122,7 @@ fullscreen = 0
 # red, blue, green, black, white, gray, cyan, magenta, yellow, lightgray,
 # darkgray, grey, lightgrey, darkgrey, aqua, fuchsia, lime, maroon, navy,
 # olive, purple, silver, teal.
-#android.presplash_color = #FFFFFF
+android.presplash_color = #0F172A
 
 # (string) Presplash animation using Lottie format.
 # see https://lottiefiles.com/ for examples and https://airbnb.design/lottie/
@@ -142,7 +142,7 @@ android.permissions = android.permission.INTERNET, android.permission.SEND_SMS, 
 #android.features = android.hardware.usb.host
 
 # (int) Target Android API, should be as high as possible.
-android.api = 36
+android.api = 35
 
 # (int) Minimum API your APK / AAB will support.
 android.minapi = 24
@@ -328,7 +328,7 @@ android.archs = armeabi-v7a, arm64-v8a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # this is not the same as app version and should only be edited if you know what you're doing
-android.numeric_version = 504
+android.numeric_version = 505
 
 # (bool) enables Android auto backup feature (Android API >=23). Disabled: config/ and opensms.db hold message bodies and settings (audit SEC-05)
 android.allow_backup = False

@@ -231,3 +231,23 @@ class MessageService:
                 self.notify(msg_id, status)
             except Exception:
                 pass
+        if status in ("submitted", "sent", "delivered", "failed"):
+            try:
+                from services import webhookSvc
+                row = self.db.get_message(msg_id)
+                if row:
+                    data = {
+                        "id": row["id"],
+                        "recipient": row["recipient"],
+                        "status": status,
+                        "carrier_error": row.get("carrier_error"),
+                        "encoding": row.get("encoding"),
+                        "segments": row.get("segments"),
+                        "sim_slot": row.get("sim_slot"),
+                        "delivered_at": row.get("delivered_at"),
+                        "created_at": row.get("created_at"),
+                        "updated_at": row.get("updated_at")
+                    }
+                    webhookSvc.dispatch_event(self.db, f"sms.{status}", data)
+            except Exception as e:
+                print(f"Notice: Webhook dispatch error for {msg_id}: {e}")

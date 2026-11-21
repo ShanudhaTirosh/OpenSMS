@@ -77,6 +77,23 @@ class LogService:
         except Exception as e:
             print(f"Error writing log: {e}")
 
+    def get_recent_logs(self, max_lines: int = 200) -> list[str]:
+        """Fast reverse-seek reader to fetch only trailing lines without loading the full file."""
+        if not os.path.exists(self.log_path):
+            return []
+        try:
+            with open(self.log_path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                read_bytes = min(size, 65536)
+                f.seek(max(0, size - read_bytes))
+                chunk = f.read().decode("utf-8", errors="replace")
+                lines = chunk.splitlines(keepends=True)
+                return lines[-max_lines:]
+        except Exception as e:
+            print(f"Error reading recent logs: {e}")
+            return []
+
     def get_api_logs(self) -> list[str]:
         logs = []
         if os.path.exists(self.log_path):

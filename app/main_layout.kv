@@ -93,6 +93,8 @@ MDScreen:
                     MDScreen:
                         name: "Mesh"
                         on_enter: app.on_tailscale_screen_entry()
+                        on_enter: tailscale_scr.start_poll()
+                        on_leave: tailscale_scr.stop_poll()
                         TailscaleBox:
                             id: tailscale_scr
                             padding: 8, 2, 8, (main_scr_box.bottom_pad + btm_nav_bar.height + 2)

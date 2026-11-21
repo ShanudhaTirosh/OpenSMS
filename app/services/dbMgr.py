@@ -75,6 +75,7 @@ class DatabaseManager:
             ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_status_created ON messages(status, created_at DESC)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_batch ON messages(batch_id)')
 
             # API Keys table
@@ -153,6 +154,7 @@ class DatabaseManager:
                 ''')
             if current < self.SCHEMA_VERSION:
                 conn.execute(f"PRAGMA user_version = {int(self.SCHEMA_VERSION)}")
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_messages_status_created ON messages(status, created_at DESC)')
 
     def get_schema_version(self) -> int:
         with self._conn() as conn:
@@ -231,6 +233,47 @@ class DatabaseManager:
             ))
             conn.commit()
         return record_id
+
+    def create_messages_batch(
+        self,
+        items: List[Dict[str, Any]]
+    ) -> List[str]:
+        """
+        Batch insert multiple messages within a single transaction to prevent
+        lock contention and excessive disk sync overhead.
+        Each item is a dict with keys:
+          recipient, text, encoding, segments, sim_slot, status, batch_id, msg_id, provider
+        """
+        if not items:
+            return []
+        now = time.time()
+        records = []
+        ids = []
+        for item in items:
+            record_id = item.get("msg_id") or str(uuid.uuid4())
+            ids.append(record_id)
+            records.append((
+                record_id,
+                item["recipient"],
+                item["text"],
+                item.get("encoding", "GSM-7"),
+                item.get("segments", 1),
+                item.get("sim_slot", -1),
+                item.get("status", "queued"),
+                item.get("batch_id"),
+                now,
+                now,
+                item.get("provider")
+            ))
+        with self._conn() as conn:
+            conn.executemany('''
+                INSERT INTO messages (
+                    id, recipient, text, encoding, segments, sim_slot,
+                    status, batch_id, created_at, updated_at, provider
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', records)
+            conn.commit()
+        return ids
 
     def update_message_status(
         self,
@@ -383,45 +426,57 @@ class DatabaseManager:
             return conn.execute('SELECT COUNT(*) FROM messages' + where, params).fetchone()[0]
 
     def get_metrics(self) -> Dict[str, Any]:
-        """Calculates live gateway stats (today's sent, failed, queue depth, success rate)."""
+        """Calculates live gateway stats (today's sent, failed, queue depth, success rate) in a single pass."""
         # Start of the current *local* day
         local_now = datetime.datetime.now().astimezone()
         start_of_day = local_now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
         with self._conn() as conn:
             cursor = conn.cursor()
-            # Queue depth
-            cursor.execute("SELECT COUNT(*) FROM messages WHERE status IN ('queued', 'sending', 'submitted')")
-            queue_depth = cursor.fetchone()[0]
-
-            # Sent today
-            cursor.execute(
-                "SELECT COUNT(*) FROM messages WHERE status IN ('sent', 'delivered') AND created_at >= ?",
-                (start_of_day,)
-            )
-            sent_today = cursor.fetchone()[0]
-
-            # Failed today
-            cursor.execute(
-                "SELECT COUNT(*) FROM messages WHERE status = 'failed' AND created_at >= ?",
-                (start_of_day,)
-            )
-            failed_today = cursor.fetchone()[0]
-
-            # All-time total
-            cursor.execute("SELECT COUNT(*) FROM messages WHERE status IN ('sent', 'delivered')")
-            total_sent = cursor.fetchone()[0]
+            cursor.execute('''
+                SELECT
+                    COUNT(CASE WHEN status IN ('queued', 'sending', 'submitted') THEN 1 END) AS queue_depth,
+                    COUNT(CASE WHEN status IN ('sent', 'delivered') AND created_at >= ? THEN 1 END) AS sent_today,
+                    COUNT(CASE WHEN status = 'failed' AND created_at >= ? THEN 1 END) AS failed_today,
+                    COUNT(CASE WHEN status IN ('sent', 'delivered') THEN 1 END) AS total_sent
+                FROM messages
+            ''', (start_of_day, start_of_day))
+            row = cursor.fetchone()
+            queue_depth = row[0] or 0
+            sent_today = row[1] or 0
+            failed_today = row[2] or 0
+            total_sent = row[3] or 0
 
             total_today = sent_today + failed_today
             success_rate = (sent_today / total_today * 100.0) if total_today > 0 else 100.0
+
+            # Per-SIM breakdown for messages sent today
+            cursor.execute('''
+                SELECT sim_slot, COUNT(*)
+                FROM messages
+                WHERE status IN ('sent', 'delivered') AND created_at >= ?
+                GROUP BY sim_slot
+            ''', (start_of_day,))
+            sim_counts = {}
+            for s_row in cursor.fetchall():
+                slot = s_row[0]
+                label = "Auto/Default" if slot in (None, -1) else f"SIM {slot + 1}"
+                sim_counts[label] = s_row[1]
 
             return {
                 "queue_depth": queue_depth,
                 "sent_today": sent_today,
                 "failed_today": failed_today,
                 "total_sent": total_sent,
-                "success_rate": round(success_rate, 1)
+                "success_rate": round(success_rate, 1),
+                "sim_breakdown": sim_counts
             }
+
+    def export_messages_csv(self, limit: int = 1000) -> str:
+        """Fetches up to `limit` messages from SQLite and exports them as CSV string."""
+        from services.uiFormat import export_messages_to_csv
+        messages = self.get_messages(limit=limit, offset=0)
+        return export_messages_to_csv(messages)
 
     # --- API Keys Operations ---
 
@@ -522,3 +577,79 @@ class DatabaseManager:
             os.replace(keys_file_path, keys_file_path + ".migrated")
         except Exception as e:
             print(f"Notice: legacy keys migration skipped: {e}")
+
+    # --- Webhooks Operations ---
+
+    SUPPORTED_WEBHOOK_EVENTS = ["sms.submitted", "sms.sent", "sms.delivered", "sms.failed"]
+
+    def add_webhook(
+        self,
+        url: str,
+        events: Optional[List[str]] = None,
+        secret: Optional[str] = None
+    ) -> str:
+        webhook_id = str(uuid.uuid4())
+        ev_list = [e for e in (events or ["sms.delivered", "sms.failed"]) if e in self.SUPPORTED_WEBHOOK_EVENTS]
+        if not ev_list:
+            ev_list = ["sms.delivered", "sms.failed"]
+        events_json = json.dumps(ev_list)
+        now = time.time()
+        with self._conn() as conn:
+            conn.execute('''
+                INSERT INTO webhooks (id, url, events, secret, is_active, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+            ''', (webhook_id, url.strip(), events_json, secret.strip() if secret else None, now))
+            conn.commit()
+        return webhook_id
+
+    def list_webhooks(self) -> List[Dict[str, Any]]:
+        with self._conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, url, events, secret, is_active, created_at FROM webhooks ORDER BY created_at DESC')
+            hooks = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                d["events"] = json.loads(d.get("events") or "[]")
+                secret_val = d.pop("secret", None)
+                d["has_secret"] = bool(secret_val)
+                hooks.append(d)
+            return hooks
+
+    def get_webhook(self, webhook_id: str, include_secret: bool = False) -> Optional[Dict[str, Any]]:
+        with self._conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, url, events, secret, is_active, created_at FROM webhooks WHERE id = ?', (webhook_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            d["events"] = json.loads(d.get("events") or "[]")
+            if not include_secret:
+                secret_val = d.pop("secret", None)
+                d["has_secret"] = bool(secret_val)
+            return d
+
+    def delete_webhook(self, webhook_id: str) -> bool:
+        with self._conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM webhooks WHERE id = ?', (webhook_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_active_webhooks_for_event(self, event: str) -> List[Dict[str, Any]]:
+        """Return active webhooks subscribed to `event` (including secret for signing)."""
+        with self._conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, url, events, secret FROM webhooks WHERE is_active = 1')
+            matching = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                evs = json.loads(d.get("events") or "[]")
+                if event in evs or "*" in evs:
+                    matching.append(d)
+            return matching
+
+    def optimize_db(self):
+        """Execute PRAGMA optimize to refresh query planner statistics."""
+        with self._conn() as conn:
+            conn.execute("PRAGMA optimize")
