@@ -22,7 +22,8 @@ app/config/
 .venv
 venv/
 env/
-
+build_logs/
+logs_*.zip
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

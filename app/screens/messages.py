@@ -359,13 +359,10 @@ class MessagesBox(MDBoxLayout):
 
     # ---------------------------------------------------------------- compose
     def show_compose_dialog(self, number: str = "", text: str = ""):
-        """Streamlined single dialog: recipient, message, live segments, preferred SIM, and direct Send."""
+        """Step 1: write the message (inline validation, live segment count). Step 2: confirm, then queue."""
         app = self._app()
         if hasattr(app, "require_gateway_service") and not app.require_gateway_service():
             return
-        sim_slot = app.config_template.get("sim_slot", -1) if hasattr(app, "config_template") else -1
-        sim_label = "Auto (System default)" if sim_slot in (None, -1) else f"SIM {sim_slot + 1}"
-
         number_field = MDTextField(
             MDTextFieldHintText(text="Phone number (e.g. +94771234567)"),
             mode="outlined",
@@ -381,20 +378,13 @@ class MessagesBox(MDBoxLayout):
             input_type="text",
             multiline=True,
             size_hint_y=None,
-            height=dp(100)
+            height=dp(112)
         )
         counter = MDLabel(
             text="",
             theme_text_color="Secondary",
             font_style="Label",
             role="medium",
-            adaptive_height=True
-        )
-        sim_info = MDLabel(
-            text=f"Routing via: {sim_label}",
-            theme_text_color="Secondary",
-            font_style="Label",
-            role="small",
             adaptive_height=True
         )
         error = MDLabel(
@@ -408,65 +398,69 @@ class MessagesBox(MDBoxLayout):
 
         def refresh_counter(*_):
             c = calculate_sms_segments(text_field.text)
-            counter.text = f"{c['length']} chars \u2022 {c['segments']} segment(s) \u2022 {c['encoding']}"
+            counter.text = f"{c['length']} characters \u2022 {c['segments']} segment(s) \u2022 {c['encoding']}"
             error.text = ""
 
         text_field.bind(text=refresh_counter)
         number_field.bind(text=lambda *_: setattr(error, "text", ""))
         refresh_counter()
 
-        sent = {"done": False}
-        send_btn = MDButton(
-            MDButtonText(text="Send", theme_text_color="Custom", text_color="green"),
-            style="text"
-        )
-
-        def do_send(*_):
-            if sent["done"]:
-                return
+        def review(*_):
             clean_number, clean_text, err = validate_outgoing(number_field.text, text_field.text)
             if err:
-                error.text = err
+                error.text = err           # the dialog and what was typed stay
+                return
+            app.txt_dialog_closer()
+            self._show_confirm(clean_number, clean_text)
+
+        content = MDDialogContentContainer(orientation="vertical", spacing=dp(10))
+        for w in (number_field, text_field, counter, error):
+            content.add_widget(w)
+        buttons = MDDialogButtonContainer(
+            Widget(),
+            MDButton(MDButtonText(text="Cancel"), style="text", on_release=app.txt_dialog_closer),
+            MDButton(MDButtonText(text="Review", theme_text_color="Custom", text_color="green"), style="text", on_release=review),
+            spacing="8dp",
+        )
+        app.show_text_dialog("New message", "Sent through the gateway queue, so it appears here with its real status.", content, buttons)
+
+    def _show_confirm(self, number: str, text: str):
+        app = self._app()
+        sim_slot = app.config_template.get("sim_slot", -1) if hasattr(app, "config_template") else -1
+        info = calculate_sms_segments(text)
+        sent = {"done": False}
+        send_btn = MDButton(MDButtonText(text="Send", theme_text_color="Custom", text_color="green"), style="text")
+
+        def do_send(*_):
+            if sent["done"]:               # prevent duplicate submissions
                 return
             sent["done"] = True
             send_btn.disabled = True
             try:
-                write_outbox(app.config_dir, clean_number, clean_text, sim_slot)
+                write_outbox(app.config_dir, number, text, sim_slot)
             except (ValueError, OSError) as e:
                 sent["done"] = False
                 send_btn.disabled = False
-                error.text = f"Could not queue: {e}"
+                app.show_toast_msg(f"Could not queue the message: {e}", is_error=True)
                 return
             app.txt_dialog_closer()
-            app.show_toast_msg("Message queued for sending")
-            Clock.schedule_once(lambda dt: self.reload(), 1.0)
+            app.show_toast_msg("Message queued")
+            Clock.schedule_once(lambda dt: self.reload(), 1.2)
 
         send_btn.bind(on_release=do_send)
-
-        content = MDDialogContentContainer(orientation="vertical", spacing=dp(8))
-        for w in (number_field, text_field, counter, sim_info, error):
-            content.add_widget(w)
-
         buttons = MDDialogButtonContainer(
             Widget(),
-            MDButton(
-                MDButtonText(text="Cancel"),
-                style="text",
-                on_release=app.txt_dialog_closer
-            ),
+            MDButton(MDButtonText(text="Edit"), style="text",
+                     on_release=lambda *_: (app.txt_dialog_closer(), self.show_compose_dialog(number, text))),
             send_btn,
             spacing="8dp",
         )
+        sim_txt = "default SIM" if sim_slot in (None, -1) else f"SIM slot {sim_slot + 1}"
         app.show_text_dialog(
-            "New Message",
-            "Send directly through the gateway queue.",
-            content,
-            buttons
-        )
-
-    def _show_confirm(self, number: str, text: str):
-        """Maintained for backwards compatibility."""
-        self.show_compose_dialog(number, text)
+            "Send this message?",
+            f"To: {number}\nVia: {sim_txt}\n{info['segments']} segment(s), {info['encoding']}\n\n{U.shorten(text, 300)}\n\n"
+            "SMS may be billed by your carrier.",
+            None, buttons)
 
     # ---------------------------------------------------------------- detail
     def open_detail(self, msg: dict):
