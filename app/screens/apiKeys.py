@@ -106,23 +106,26 @@ Builder.load_string('''
             theme_text_color: "Secondary"
             adaptive_height: True
 
+        MDButton:
+            style: "filled"
+            size_hint_x: 1
+            height: dp(48)
+            on_release: root.show_create_dialog()
+            MDButtonIcon:
+                icon: "key-plus"
+            MDButtonText:
+                text: "Generate New API Key"
+
         MDBoxLayout:
             orientation: "horizontal"
             adaptive_height: True
             spacing: dp(8)
-
-            MDButton:
-                style: "filled"
-                height: dp(48)
-                on_release: root.show_create_dialog()
-                MDButtonIcon:
-                    icon: "key-plus"
-                MDButtonText:
-                    text: "New key"
+            size_hint_x: 1
 
             MDButton:
                 style: "tonal"
-                height: dp(48)
+                size_hint_x: 0.5
+                height: dp(44)
                 on_release: root.show_webhooks_dialog()
                 MDButtonIcon:
                     icon: "webhook"
@@ -131,12 +134,13 @@ Builder.load_string('''
 
             MDButton:
                 style: "tonal"
-                height: dp(48)
+                size_hint_x: 0.5
+                height: dp(44)
                 on_release: root.show_quick_connect_dialog()
                 MDButtonIcon:
                     icon: "link-variant"
                 MDButtonText:
-                    text: "Connect"
+                    text: "Quick Connect"
 
     MDScrollView:
         do_scroll_x: False

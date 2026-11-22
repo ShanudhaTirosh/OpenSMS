@@ -1452,48 +1452,54 @@ class OpenSmsApp(MDApp):
         except Exception:
             pass
 
+    def set_nav_back_mode(self, show_back: bool):
+        """Toggle between hamburger menu icon and back arrow icon in TopAppBar."""
+        try:
+            if hasattr(self, 'root') and hasattr(self.root, 'ids'):
+                if 'top_menu_btn' in self.root.ids:
+                    self.root.ids.top_menu_btn.disabled = show_back
+                    self.root.ids.top_menu_btn.opacity = 0 if show_back else 1
+                if 'top_back_btn' in self.root.ids:
+                    self.root.ids.top_back_btn.disabled = not show_back
+                    self.root.ids.top_back_btn.opacity = 1 if show_back else 0
+        except Exception:
+            pass
+
     def on_main_screen_entry(self, instance=None):
         self.screen_title = "OpenSMS • Gateway"
-        self.root.ids.top_back_btn.opacity = 0
-        self.root.ids.top_back_btn.disabled = True
+        self.set_nav_back_mode(False)
         self.update_network_addresses()
         self.update_home_metrics()
 
     def on_tailscale_screen_entry(self, instance=None):
         self.screen_title = "OpenSMS • Mesh"
-        self.root.ids.top_back_btn.opacity = 1
-        self.root.ids.top_back_btn.disabled = False
+        self.set_nav_back_mode(False)
         port = self.req_template.get("port", 9292)
         if "tailscale_scr" in self.root.ids:
             self.root.ids.tailscale_scr.update_tailscale_info(port=port)
 
     def _plain_screen_entry(self, title: str):
         self.screen_title = title
-        self.root.ids.top_back_btn.opacity = 0
-        self.root.ids.top_back_btn.disabled = True
+        self.set_nav_back_mode(False)
 
     def on_messages_entry(self, instance=None):
         self._plain_screen_entry("OpenSMS • Messages")
 
     def on_system_entry(self, instance=None):
         self.screen_title = "OpenSMS • System"
-        self.root.ids.top_back_btn.opacity = 1
-        self.root.ids.top_back_btn.disabled = False
+        self.set_nav_back_mode(True)
 
     def on_api_entry(self, instance=None):
         self._plain_screen_entry("OpenSMS • API Keys")
 
     def on_settings_entry(self, instance=None):
         self.screen_title = "OpenSMS • Settings"
-        self.root.ids.top_back_btn.opacity = 1
-        self.root.ids.top_back_btn.disabled = False
+        self.set_nav_back_mode(False)
         self.refresh_settings_view()
 
     def on_logs_screen_entry(self, right_dot_menu=None, top_back_btn=None):
         self.screen_title = "OpenSMS • API Logs"
-        if top_back_btn:
-            top_back_btn.opacity = 1
-            top_back_btn.disabled = False
+        self.set_nav_back_mode(True)
         if "log_scr" in self.root.ids:
             self.root.ids.log_scr.log_show(right_dot_menu, top_back_btn)
 
@@ -1507,6 +1513,12 @@ class OpenSmsApp(MDApp):
             if self.txt_dialog:
                 self.txt_dialog_closer()
                 return True
+            try:
+                if hasattr(self.root, 'ids') and 'nav_drawer' in self.root.ids and self.root.ids.nav_drawer.state == "open":
+                    self.close_nav_drawer()
+                    return True
+            except Exception:
+                pass
             if self.root.ids.screen_manager.current in ["Settings", "Logs", "Mesh", "System", "API", "Messages"]:
                 self.back_button_action()
                 return True

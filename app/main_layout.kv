@@ -29,14 +29,20 @@ MDScreen:
 
             MDTopAppBarLeadingButtonContainer:
                 MDActionTopAppBarButton:
+                    id: top_menu_btn
                     icon: "menu"
                     color: "white"
+                    size_hint_x: None
+                    width: dp(48) if not self.disabled else 0
+                    opacity: 0 if self.disabled else 1
                     on_release: app.toggle_nav_drawer()
                 MDActionTopAppBarButton:
                     id: top_back_btn
                     icon: "arrow-left"
                     color: "white"
-                    opacity: 0
+                    size_hint_x: None
+                    width: dp(48) if not self.disabled else 0
+                    opacity: 0 if self.disabled else 1
                     disabled: True
                     on_release: app.back_button_action()
             MDTopAppBarTitle:
@@ -114,11 +120,41 @@ MDScreen:
                             id: log_scr
                             padding: 8, 2, 8, (main_scr_box.bottom_pad + btm_nav_bar.height + 2)
 
+                MDNavigationBar:
+                    id: btm_nav_bar
+                    pos: 0, main_scr_box.bottom_pad
+                    on_switch_tabs: app.on_switch_tabs(*args)
+
+                    BaseMDNavigationItem
+                        icon: "cellphone-wireless"
+                        text: "SMS"
+                        active: True
+
+                    BaseMDNavigationItem
+                        icon: "message-text-outline"
+                        text: "Messages"
+
+                    BaseMDNavigationItem
+                        icon: "key-outline"
+                        text: "API"
+
+                    BaseMDNavigationItem
+                        icon: "shield-account-outline"
+                        text: "Mesh"
+
+                    BaseMDNavigationItem
+                        icon: "cog-outline"
+                        text: "Settings"
+
                 MDNavigationDrawer:
                     id: nav_drawer
                     radius: 0, dp(16), dp(16), 0
+                    on_open: btm_nav_bar.disabled = True
+                    on_close: btm_nav_bar.disabled = False
 
                     MDNavigationDrawerMenu:
+                        padding: dp(16), dp(24), dp(16), dp(16)
+
                         MDNavigationDrawerLabel:
                             text: "OpenSMS Gateway"
 
@@ -210,29 +246,3 @@ MDScreen:
                                 icon: "information-outline"
                             MDNavigationDrawerItemText:
                                 text: "About OpenSMS"
-
-            MDNavigationBar:
-                id: btm_nav_bar
-                pos: 0, main_scr_box.bottom_pad
-                on_switch_tabs: app.on_switch_tabs(*args)
-
-                BaseMDNavigationItem
-                    icon: "cellphone-wireless"
-                    text: "SMS"
-                    active: True
-
-                BaseMDNavigationItem
-                    icon: "message-text-outline"
-                    text: "Messages"
-
-                BaseMDNavigationItem
-                    icon: "key-outline"
-                    text: "API"
-
-                BaseMDNavigationItem
-                    icon: "shield-account-outline"
-                    text: "Mesh"
-
-                BaseMDNavigationItem
-                    icon: "cog-outline"
-                    text: "Settings"

@@ -183,10 +183,12 @@ Builder.load_string('''
                     orientation: 'horizontal'
                     adaptive_height: True
                     spacing: dp(8)
-                    pos_hint: {"center_x": 0.5}
+                    size_hint_x: 1
 
                     MDButton:
                         style: "outlined"
+                        size_hint_x: 0.5
+                        height: dp(42)
                         on_release: app.copy_endpoint_url()
                         MDButtonIcon:
                             icon: "content-copy"
@@ -195,19 +197,13 @@ Builder.load_string('''
 
                     MDButton:
                         style: "outlined"
+                        size_hint_x: 0.5
+                        height: dp(42)
                         on_release: app.copy_curl_example()
                         MDButtonIcon:
                             icon: "code-tags"
                         MDButtonText:
                             text: "Copy cURL"
-
-                    MDButton:
-                        style: "outlined"
-                        on_release: app.show_quick_connect_dialog()
-                        MDButtonIcon:
-                            icon: "link-variant"
-                        MDButtonText:
-                            text: "Connect"
 
             # Live Metrics Dashlet Row
             MDBoxLayout:
@@ -310,37 +306,50 @@ Builder.load_string('''
                     adaptive_height: True
 
                 MDGridLayout:
-                    cols: 3
+                    cols: 2
                     adaptive_height: True
-                    spacing: dp(6)
+                    spacing: dp(8)
                     size_hint_x: 1
 
                     MDButton:
                         style: "tonal"
-                        size_hint_x: 0.33
+                        size_hint_x: 0.5
+                        height: dp(44)
                         on_release: app.show_test_sms_dialog()
                         MDButtonIcon:
                             icon: "send"
                         MDButtonText:
-                            text: "Test SMS"
+                            text: "Send Test SMS"
 
                     MDButton:
                         style: "tonal"
-                        size_hint_x: 0.33
+                        size_hint_x: 0.5
+                        height: dp(44)
+                        on_release: app.show_quick_connect_dialog()
+                        MDButtonIcon:
+                            icon: "link-variant"
+                        MDButtonText:
+                            text: "Quick Connect"
+
+                    MDButton:
+                        style: "tonal"
+                        size_hint_x: 0.5
+                        height: dp(44)
                         on_release: app.goto_tailscale_screen()
                         MDButtonIcon:
                             icon: "shield-account-outline"
                         MDButtonText:
-                            text: "Mesh"
+                            text: "Remote Mesh"
 
                     MDButton:
                         style: "tonal"
-                        size_hint_x: 0.33
+                        size_hint_x: 0.5
+                        height: dp(44)
                         on_release: app.check_for_updates_manually()
                         MDButtonIcon:
                             icon: "cloud-search-outline"
                         MDButtonText:
-                            text: "Updates"
+                            text: "Check Updates"
 
             Widget:
                 size_hint_y: None
